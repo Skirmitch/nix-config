@@ -140,7 +140,7 @@
     isNormalUser = true;
     description = "Skirmitch";
     extraGroups = [ "networkmanager" "wheel" "video" "dialout" ];
-    hashedPassword = "$y$j9T$z7hQ9X7Lykrjb38n3V2y8/$jS7EbPmQZQHHt1VS8wTAHtTOS.YtgXK7BtU.H75iiL0"
+    hashedPassword = "$y$j9T$z7hQ9X7Lykrjb38n3V2y8/$jS7EbPmQZQHHt1VS8wTAHtTOS.YtgXK7BtU.H75iiL0";
   };
 
   users.users.root = {
