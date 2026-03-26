@@ -1,6 +1,4 @@
 {
-  #Testing permanence
-
   description = "Skirmitch's NixOS Flake Configuration";
 
   inputs = {
@@ -21,8 +19,8 @@
       system = "x86_64-linux";
       specialArgs = { inherit inputs; };
       modules = [
-        ./hosts/desktop/default.nix
-        impermanence.nixosModules.impermanence        
+        ./hosts/diana/default.nix
+        impermanence.nixosModules.impermanence
         home-manager.nixosModules.home-manager
         aagl.nixosModules.default
         {
