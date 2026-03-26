@@ -17,7 +17,7 @@
   };
 
   outputs = { self, nixpkgs, home-manager, impermanence, aagl, ... }@inputs: {
-    nixosConfigurations.desktop = nixpkgs.lib.nixosSystem {
+    nixosConfigurations.diana = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       specialArgs = { inherit inputs; };
       modules = [
