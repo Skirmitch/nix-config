@@ -47,6 +47,7 @@
         ".config/discord"
         ".config/Claude"
         ".local/share/anime-game-launcher"
+        ".local/share/dconf"
         "Downloads"
         "Documents"
         "Pictures"
