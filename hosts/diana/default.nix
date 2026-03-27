@@ -11,6 +11,7 @@
     ../../modules/system/input.nix
     ../../modules/system/users.nix
     ../../modules/gaming
+    ../../modules/apps/claude.nix
   ];
 
   system.stateVersion = "25.11";

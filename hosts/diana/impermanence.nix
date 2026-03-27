@@ -45,6 +45,7 @@
         ".local/share/fcitx5"
         ".config/vivaldi"
         ".config/discord"
+        ".config/Claude"
         ".local/share/anime-game-launcher"
         "Downloads"
         "Documents"

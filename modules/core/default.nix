@@ -22,5 +22,6 @@
     wget
     curl
     lm_sensors
+    binutils
   ];
 }

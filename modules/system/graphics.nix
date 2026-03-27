@@ -8,6 +8,11 @@
 
   services.displayManager.gdm.enable = true;
   services.desktopManager.gnome.enable = true;
+  environment.sessionVariables = {
+  CLAUDE_USE_WAYLAND = "1";
+  NIXOS_OZONE_WL = "1";      # covers other Electron apps like Discord, VS Code
+  ELECTRON_OZONE_PLATFORM_HINT = "wayland";  # fallback for anything else
+};
 
   hardware.graphics = { enable = true; enable32Bit = true; };
 
