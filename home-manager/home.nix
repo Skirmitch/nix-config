@@ -17,6 +17,8 @@
     shellAliases = {
       rebuild = "sudo nixos-rebuild switch --flake ~/nix-config#diana";
       update = "sudo nixos-rebuild switch --flake ~/nix-config#diana --upgrade";
+      nordconnect = "sudo wgnord connect"
+      norddisconnect = "sudo wgnord disconnect"
     };
   };
 
