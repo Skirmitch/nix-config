@@ -31,6 +31,7 @@
       "/var/lib/systemd/coredump"
       "/etc/NetworkManager/system-connections"
       "/var/lib/wgnord"
+      "/etc/wireguard"
     ];
     files = [
       "/etc/machine-id"
