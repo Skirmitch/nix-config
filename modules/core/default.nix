@@ -23,5 +23,6 @@
     curl
     lm_sensors
     binutils
+    python3
   ];
 }

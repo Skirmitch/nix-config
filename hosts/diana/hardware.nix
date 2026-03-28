@@ -51,6 +51,31 @@
       options = [ "subvol=@log" ];
     };
 
+#  ---  DATA DRIVES AND MOUNTING POINTS
+  fileSystems."/mnt/windows" = {
+    device = "/dev/disk/by-uuid/B4A894D9A8949B84";
+    fsType = "ntfs3";
+    options = [ "rw" "uid=1000" "gid=100" "dmask=022" "fmask=133" "nofail" ];
+  };
+
+  fileSystems."/mnt/hp-ssd" = {
+    device = "/dev/disk/by-uuid/C64A6A6B4A6A57E7";
+    fsType = "ntfs3";
+    options = [ "rw" "uid=1000" "gid=100" "dmask=022" "fmask=133" "nofail" ];
+  };
+
+  fileSystems."/mnt/data" = {
+    device = "/dev/disk/by-uuid/ACF89E50F89E18A2";
+    fsType = "ntfs3";
+    options = [ "rw" "uid=1000" "gid=100" "dmask=022" "fmask=133" "nofail" ];
+  };
+
+  fileSystems."/mnt/sda" = {
+    device = "/dev/disk/by-uuid/903A9B663A9B485C";
+    fsType = "ntfs3";
+    options = [ "rw" "uid=1000" "gid=100" "dmask=022" "fmask=133" "nofail" ];
+  };
+
   swapDevices = [ ];
 
   nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
