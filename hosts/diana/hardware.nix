@@ -52,9 +52,10 @@
     };
 
 #  ---  DATA DRIVES AND MOUNTING POINTS
+
   fileSystems."/mnt/windows" = {
     device = "/dev/disk/by-uuid/B4A894D9A8949B84";
-    fsType = "ntfs3";
+    fsType = "ntfs";
     options = [ "rw" "uid=1000" "gid=100" "dmask=022" "fmask=133" "nofail" ];
   };
 
