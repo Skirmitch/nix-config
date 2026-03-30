@@ -13,7 +13,7 @@
     aagl.url = "github:ezKEa/aagl-gtk-on-nix";
     aagl.inputs.nixpkgs.follows = "nixpkgs";
     claude-desktop.url = "github:aaddrick/claude-desktop-debian";
-
+    claude-code-nix.url = "github:sadjow/claude-code-nix";
   };
 
   outputs = { self, nixpkgs, home-manager, impermanence, aagl, ... }@inputs: {
