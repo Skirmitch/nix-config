@@ -3,7 +3,7 @@
   users.users.skirmitch = {
     isNormalUser = true;
     description = "Skirmitch";
-    extraGroups = [ "networkmanager" "wheel" "video" "dialout" "nordvpn" ];
+    extraGroups = [ "networkmanager" "wheel" "video" "dialout" "nordvpn" "docker" ];
     hashedPassword = "$y$j9T$z7hQ9X7Lykrjb38n3V2y8/$jS7EbPmQZQHHt1VS8wTAHtTOS.YtgXK7BtU.H75iiL0";
   };
 

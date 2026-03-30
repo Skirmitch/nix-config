@@ -12,6 +12,7 @@
     ../../modules/system/users.nix
     ../../modules/gaming
     ../../modules/apps/claude.nix
+    ../../modules/apps/docker.nix
   ];
 
   system.stateVersion = "25.11";

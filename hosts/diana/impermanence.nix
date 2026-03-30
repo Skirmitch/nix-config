@@ -32,6 +32,7 @@
       "/etc/NetworkManager/system-connections"
       "/var/lib/wgnord"
       "/etc/wireguard"
+      "/var/lib/docker"
     ];
     files = [
       "/etc/machine-id"
