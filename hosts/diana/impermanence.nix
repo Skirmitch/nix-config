@@ -58,6 +58,8 @@
         "Documents"
         "Pictures"
         "Videos"
+        ".config/Code"
+        ".vscode"
       ];
     };
   };
