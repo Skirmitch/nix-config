@@ -19,7 +19,6 @@
     dmidecode
     gnomeExtensions.kimpanel
     nvitop
-    vscode
   ];
 
   xdg.desktopEntries.discord = {

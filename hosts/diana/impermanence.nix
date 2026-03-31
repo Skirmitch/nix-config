@@ -60,6 +60,8 @@
         "Videos"
         ".config/Code"
         ".vscode"
+        ".config/JetBrains"       
+        ".local/share/JetBrains"  
       ];
     };
   };
