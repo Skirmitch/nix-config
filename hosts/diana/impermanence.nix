@@ -62,6 +62,7 @@
         ".vscode"
         ".config/JetBrains"       
         ".local/share/JetBrains"  
+        ".aws"
       ];
     };
   };
