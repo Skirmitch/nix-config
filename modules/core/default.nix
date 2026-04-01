@@ -24,5 +24,6 @@
     lm_sensors
     binutils
     python3
+    usbutils
   ];
 }
