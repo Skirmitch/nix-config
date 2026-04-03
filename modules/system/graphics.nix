@@ -10,7 +10,6 @@
   services.desktopManager.gnome.enable = true;
   environment.sessionVariables = {
   CLAUDE_USE_WAYLAND = "1";
-  NIXOS_OZONE_WL = "1";      # covers other Electron apps like Discord, VS Code
 };
 
   hardware.graphics = { enable = true; enable32Bit = true; };

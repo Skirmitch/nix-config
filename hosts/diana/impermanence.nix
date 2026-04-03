@@ -63,7 +63,6 @@
         ".config/JetBrains"       
         ".local/share/JetBrains"  
         ".aws"
-        ".config/pipewire"
         ".config/easyeffects"
       ];
     };
