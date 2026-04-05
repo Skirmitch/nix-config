@@ -63,8 +63,7 @@
         ".config/JetBrains"       
         ".local/share/JetBrains"  
         ".aws"
-        ".config/easyeffects"
-      ];
+       ];
     };
   };
 }

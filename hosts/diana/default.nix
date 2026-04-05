@@ -1,4 +1,4 @@
-{ ... }: {
+{ nixosLabel, ... }: {
   imports = [
     ./hardware.nix
     ./impermanence.nix
@@ -15,6 +15,7 @@
     ../../modules/apps/docker.nix
     ../../modules/apps/programming.nix
   ];
-
+  
+  system.nixos.label = nixosLabel;
   system.stateVersion = "25.11";
 }

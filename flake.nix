@@ -19,7 +19,17 @@
   outputs = { self, nixpkgs, home-manager, impermanence, aagl, ... }@inputs: {
     nixosConfigurations.diana = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
-      specialArgs = { inherit inputs; };
+      specialArgs = { 
+        inherit inputs;
+        nixosLabel = let
+          labelPath = ./.nixos-label;
+          raw = if builtins.pathExists labelPath 
+            then builtins.readFile labelPath 
+            else "default";
+          clean = builtins.replaceStrings ["\n" " " ":" "/"] ["" "_" "-" "-"] raw;
+        in builtins.substring 0 50 clean;
+        };
+
       modules = [
         ./hosts/diana/default.nix
         impermanence.nixosModules.impermanence
