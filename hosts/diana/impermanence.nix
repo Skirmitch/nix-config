@@ -63,6 +63,8 @@
         ".config/JetBrains"       
         ".local/share/JetBrains"  
         ".aws"
+        ".config/cura"
+        ".local/share/cura"
        ];
     };
   };
