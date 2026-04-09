@@ -65,6 +65,7 @@
         ".aws"
         ".config/cura"
         ".config/OrcaSlicer"
+        ".config/libreoffice"
        ];
     };
   };

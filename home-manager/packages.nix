@@ -19,6 +19,7 @@
     dmidecode
     gnomeExtensions.kimpanel
     nvitop
+    libreoffice
   ];
 
   xdg.desktopEntries.discord = {
