@@ -20,6 +20,7 @@
     gnomeExtensions.kimpanel
     nvitop
     libreoffice
+    obsidian
   ];
 
   xdg.desktopEntries.discord = {

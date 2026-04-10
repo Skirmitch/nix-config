@@ -66,6 +66,7 @@
         ".config/cura"
         ".config/OrcaSlicer"
         ".config/libreoffice"
+        ".config/obsidian"
        ];
     };
   };
