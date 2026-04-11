@@ -25,7 +25,7 @@
     '';
     shellAliases = {
       dif = "nix store diff-closures /run/current-system $(sudo nix build --no-link --print-out-paths ~/nix-config#nixosConfigurations.diana.config.system.build.toplevel 2>/dev/null)";
-      update = "cd /home/skirmitch/nix-config && sudo nix flake update /home/skirmitch/nix-config && sudo nixos-rebuild switch --flake /home/skirmitch/nix-config#diana";
+      update = "cd /home/skirmitch/nix-config && sudo nix flake update /home/skirmitch/nix-config && rebuild \"Updated previous system\"";
       nordconnect = "sudo wgnord connect";
       norddisconnect = "sudo wgnord disconnect";
     };
