@@ -28,5 +28,5 @@
       destination = "/etc/udev/rules.d/70-xpadneo-disable-hidraw.rules";
     })
   ];
-}
+
 }
