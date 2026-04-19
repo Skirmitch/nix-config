@@ -25,5 +25,6 @@
     binutils
     python3
     usbutils
+    ndv
   ];
 }
