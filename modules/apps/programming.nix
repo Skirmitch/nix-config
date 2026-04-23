@@ -7,5 +7,6 @@
     nodejs
     jetbrains.rust-rover
     sqlite
+    file
   ];
 }
