@@ -8,5 +8,6 @@
     jetbrains.rust-rover
     sqlite
     file
+    poetry
   ];
 }
