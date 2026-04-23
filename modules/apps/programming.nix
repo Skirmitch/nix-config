@@ -6,5 +6,6 @@
     ssm-session-manager-plugin
     nodejs
     jetbrains.rust-rover
+    sqlite
   ];
 }
