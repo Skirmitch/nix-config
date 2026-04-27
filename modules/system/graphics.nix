@@ -19,11 +19,11 @@
     nvidiaSettings = true;
     modesetting.enable = true;
     open = false;
-    package = (config.boot.kernelPackages.nvidiaPackages.stable.overrideAttrs {
-      src = pkgs.fetchurl {
-        url = "https://us.download.nvidia.com/XFree86/Linux-x86_64/595.45.04/NVIDIA-Linux-x86_64-595.45.04.run";
-        sha256 = "sha256-zUllSSRsuio7dSkcbBTuxF+dN12d6jEPE0WgGvVOj14=";
-      };
-    });
+    package = config.boot.kernelPackages.nvidiaPackages.stable;
+#    package = (config.boot.kernelPackages.nvidiaPackages.stable.overrideAttrs {
+#      src = pkgs.fetchurl {
+#        url = "https://us.download.nvidia.com/XFree86/Linux-x86_64/595.45.04/NVIDIA-Linux-x86_64-595.45.04.run";
+#        sha256 = "sha256-zUllSSRsuio7dSkcbBTuxF+dN12d6jEPE0WgGvVOj14=";
+#      };
   };
 }
