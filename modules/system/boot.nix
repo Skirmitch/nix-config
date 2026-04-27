@@ -4,5 +4,5 @@
   boot.loader.efi.canTouchEfiVariables = true;
   boot.kernelModules = [ "asus_ec_sensors" ];
   boot.initrd.systemd.enable = false;
-  boot.kernelPackages = pkgs.linuxPackages_6_12;
+  boot.kernelPackages = pkgs.linuxPackages_latest;
 }

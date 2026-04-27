@@ -1,1 +1,1 @@
-Switched to nixpkgs stable NVIDIA driver
+Removed kernel 6.12 pin
