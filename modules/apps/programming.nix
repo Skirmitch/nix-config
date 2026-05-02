@@ -9,5 +9,6 @@
     sqlite
     file
     poetry
+    gh
   ];
 }
