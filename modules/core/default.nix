@@ -26,5 +26,6 @@
     python3
     usbutils
     nvd
+    unzip
   ];
 }
