@@ -10,6 +10,5 @@
     file
     poetry
     gh
-    python3
   ];
 }
