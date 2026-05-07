@@ -10,5 +10,6 @@
     file
     poetry
     gh
+    playwright-test
   ];
 }
