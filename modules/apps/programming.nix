@@ -12,5 +12,6 @@
     gh
     playwright-test
     shellcheck
+    sentry-cli
   ];
 }
