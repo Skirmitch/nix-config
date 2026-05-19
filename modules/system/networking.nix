@@ -1,6 +1,6 @@
 { pkgs, ... }: {
   # --- NETWORKING ---
-  networking.hostName = "Diana";
+  # hostName is set per-host in hosts/<name>/default.nix
   networking.networkmanager.enable = true;
   hardware.bluetooth = {
     enable = true;

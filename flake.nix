@@ -16,31 +16,35 @@
     claude-code-nix.url = "github:sadjow/claude-code-nix";
   };
 
-  outputs = { self, nixpkgs, home-manager, impermanence, aagl, ... }@inputs: {
-    nixosConfigurations.diana = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
-      specialArgs = { 
-        inherit inputs;
-        nixosLabel = let
-          labelPath = ./.nixos-label;
-          raw = if builtins.pathExists labelPath 
-            then builtins.readFile labelPath 
-            else "default";
-          clean = builtins.replaceStrings ["\n" " " ":" "/"] ["" "_" "-" "-"] raw;
-        in builtins.substring 0 50 clean;
-        };
+  outputs = { self, nixpkgs, home-manager, impermanence, aagl, ... }@inputs:
+    let
+      nixosLabel = let
+        labelPath = ./.nixos-label;
+        raw = if builtins.pathExists labelPath
+          then builtins.readFile labelPath
+          else "default";
+        clean = builtins.replaceStrings ["\n" " " ":" "/"] ["" "_" "-" "-"] raw;
+      in builtins.substring 0 50 clean;
 
-      modules = [
-        ./hosts/diana/default.nix
-        impermanence.nixosModules.impermanence
-        home-manager.nixosModules.home-manager
-        aagl.nixosModules.default
-        {
-          home-manager.useGlobalPkgs = true;
-          home-manager.useUserPackages = true;
-          home-manager.users.skirmitch = import ./home-manager/home.nix;
-        }
-      ];
+      mkHost = hostName: nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        specialArgs = { inherit inputs nixosLabel; };
+        modules = [
+          ./hosts/${hostName}
+          impermanence.nixosModules.impermanence
+          home-manager.nixosModules.home-manager
+          aagl.nixosModules.default
+          {
+            home-manager.useGlobalPkgs = true;
+            home-manager.useUserPackages = true;
+            home-manager.users.skirmitch = import ./home-manager/home.nix;
+          }
+        ];
+      };
+    in {
+      nixosConfigurations = {
+        diana = mkHost "diana";
+        lenovo = mkHost "lenovo";
+      };
     };
-  };
 }
