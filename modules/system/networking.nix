@@ -2,6 +2,7 @@
   # --- NETWORKING ---
   # hostName is set per-host in hosts/<name>/default.nix
   networking.networkmanager.enable = true;
+  networking.firewall.trustedInterfaces = [ "wlp12s0u1i3" ];
   hardware.bluetooth = {
     enable = true;
     powerOnBoot = true;
