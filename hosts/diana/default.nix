@@ -16,6 +16,7 @@
     ../../modules/apps/docker.nix
     ../../modules/apps/programming.nix
     ../../modules/apps/printing3d.nix
+    ../../modules/apps/vr.nix
   ];
 
   networking.hostName = "Diana";

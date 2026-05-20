@@ -67,7 +67,19 @@
         ".config/OrcaSlicer"
         ".config/libreoffice"
         ".config/obsidian"
+        ".config/alvr"
+        ".config/wivrn"
+        ".android"
+        ".config/SideQuest"
+        ".steam"
+        ".local/share/Steam"
+        ".claude"
+        ".config/gh"
+        ".local/share/keyrings"
        ];
+      files = [
+        ".gitconfig"
+      ];
     };
   };
 }
