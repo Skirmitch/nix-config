@@ -18,6 +18,7 @@
     ../../modules/apps/programming.nix
     ../../modules/apps/printing3d.nix
     ../../modules/apps/vr.nix
+    ../../modules/apps/sunshine.nix
   ];
 
   networking.hostName = "Diana";
