@@ -12,7 +12,8 @@
 
     aagl.url = "github:ezKEa/aagl-gtk-on-nix";
     aagl.inputs.nixpkgs.follows = "nixpkgs";
-    claude-desktop.url = "github:aaddrick/claude-desktop-debian";
+    # pinned: later revs fail to build Claude Desktop 1.8089.1 (tray-menu patch); un-pin when upstream fixes it
+    claude-desktop.url = "github:aaddrick/claude-desktop-debian/ba2846c8b3e99ac35563e6c2184dd999b19bbc95";
     claude-code-nix.url = "github:sadjow/claude-code-nix";
   };
 
