@@ -8,6 +8,7 @@
     ../../modules/system/nvidia.nix
     ../../modules/system/audio.nix
     ../../modules/system/networking.nix
+    ../../modules/system/vpn-hotspot.nix
     ../../modules/system/fonts.nix
     ../../modules/system/input.nix
     ../../modules/system/users.nix
