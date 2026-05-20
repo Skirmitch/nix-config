@@ -69,6 +69,7 @@
         ".config/obsidian"
         ".config/alvr"
         ".config/wivrn"
+        ".config/openxr"
         ".config/sunshine"
         ".android"
         ".config/SideQuest"
