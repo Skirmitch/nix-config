@@ -20,6 +20,7 @@
     ../../modules/apps/printing3d.nix
     ../../modules/apps/vr.nix
     ../../modules/apps/sunshine.nix
+    ../../modules/apps/immersed.nix
   ];
 
   networking.hostName = "Diana";
