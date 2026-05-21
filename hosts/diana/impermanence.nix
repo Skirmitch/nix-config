@@ -67,7 +67,6 @@
         ".config/OrcaSlicer"
         ".config/libreoffice"
         ".config/obsidian"
-        ".config/alvr"
         ".config/wivrn"
         ".config/openxr"
         ".config/sunshine"
