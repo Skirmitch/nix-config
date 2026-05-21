@@ -1,14 +1,28 @@
-{ ... }: {
+{ pkgs, ... }: {
   imports = [ ./packages.nix ];
 
   home.username = "skirmitch";
   home.homeDirectory = "/home/skirmitch";
   home.stateVersion = "25.11";
 
+  # Pin the cursor theme declaratively. Logging into Xfce blanks the shared
+  # dconf cursor keys (cursor-theme='' / cursor-size=0), which leaves GNOME
+  # with the white-square X11 fallback. This re-asserts a real theme on rebuild.
+  home.pointerCursor = {
+    gtk.enable = true;
+    name = "Adwaita";
+    package = pkgs.adwaita-icon-theme;
+    size = 24;
+  };
+
   # GNOME specific overrides
   dconf.settings = {
     "org/gnome/shell" = {
       enabled-extensions = [ "kimpanel@kde.org" ];
+    };
+    "org/gnome/desktop/interface" = {
+      cursor-theme = "Adwaita";
+      cursor-size = 24;
     };
   };
 
