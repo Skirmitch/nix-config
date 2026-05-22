@@ -71,6 +71,7 @@ let
                  802-11-wireless.mode ap \
                  802-11-wireless.band a 802-11-wireless.channel "$HS_CHANNEL" \
                  wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$psk" \
+                 wifi-sec.proto rsn wifi-sec.pairwise ccmp wifi-sec.group ccmp \
                  ipv4.method shared ipv6.method ignore >/dev/null; then
             err "Failed to create the NetworkManager profile."
             exit 1
