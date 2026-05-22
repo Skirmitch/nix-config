@@ -1,1 +1,1 @@
-Fixed dont use non nvidia
+Fix GNOME cursor via systemd user service before gnome-shell

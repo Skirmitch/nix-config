@@ -26,6 +26,40 @@
     };
   };
 
+  # The dconf.settings above only re-assert the cursor on rebuild. Since Xfce
+  # blanks those keys at runtime, this systemd user service re-asserts them on
+  # every GNOME login. It is ordered before gnome-shell so the white-square
+  # fallback never even flashes, and it no-ops when the session isn't GNOME
+  # (so logging into Xfce won't trigger it).
+  systemd.user.services.fix-gnome-cursor = {
+    Unit = {
+      Description = "Re-assert GNOME cursor theme blanked by Xfce";
+      Before = [
+        "org.gnome.Shell@x11.service"
+        "org.gnome.Shell@wayland.service"
+        "gnome-session-initialized.target"
+      ];
+      After = [ "graphical-session-pre.target" ];
+      PartOf = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "oneshot";
+      ExecStart = let
+        fixCursor = pkgs.writeShellScript "fix-gnome-cursor" ''
+          case "$XDG_CURRENT_DESKTOP" in
+            *GNOME*) ;;
+            *) exit 0 ;;
+          esac
+          ${pkgs.dconf}/bin/dconf write /org/gnome/desktop/interface/cursor-theme "'Adwaita'"
+          ${pkgs.dconf}/bin/dconf write /org/gnome/desktop/interface/cursor-size 24
+        '';
+      in "${fixCursor}";
+    };
+    Install = {
+      WantedBy = [ "gnome-session-initialized.target" ];
+    };
+  };
+
   programs.bash = {
     enable = true;
     initExtra = ''
