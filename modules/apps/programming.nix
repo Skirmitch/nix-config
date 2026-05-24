@@ -13,5 +13,6 @@
     playwright-test
     shellcheck
     sentry-cli
+    openssl
   ];
 }
