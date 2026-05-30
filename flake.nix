@@ -6,7 +6,10 @@
     impermanence.url = "github:nix-community/impermanence";
 
     home-manager = {
-      url = "github:nix-community/home-manager";
+      # Pinned 2026-05-30 to release-26.05 to match nixpkgs nixos-unstable (26.05).
+      # HM master jumped to 26.11 at the release boundary, tripping the version-mismatch
+      # warning. Bump to release-26.11 (or back to master) once nixpkgs reaches 26.11.
+      url = "github:nix-community/home-manager/release-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
