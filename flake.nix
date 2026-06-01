@@ -13,7 +13,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    aagl.url = "github:ezKEa/aagl-gtk-on-nix";
+    # Pinned 2026-06-01 to release-26.05 to match nixpkgs (26.05). aagl's main
+    # branch jumped to release 26.11 at the boundary, tripping its built-in
+    # nixpkgs-release mismatch warning. Bump to release-26.11 once nixpkgs reaches
+    # 26.11 (same story as the home-manager pin above).
+    aagl.url = "github:ezKEa/aagl-gtk-on-nix/release-26.05";
     aagl.inputs.nixpkgs.follows = "nixpkgs";
     # Pinned 2026-05-29: HEAD rev 2ae2172 (Claude Desktop 1.9659.2) fails to build —
     # upstream patch step "[FAIL] addTrustedFolder anchor not found" (.asar guard).
