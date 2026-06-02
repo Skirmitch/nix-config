@@ -19,10 +19,12 @@
     # 26.11 (same story as the home-manager pin above).
     aagl.url = "github:ezKEa/aagl-gtk-on-nix/release-26.05";
     aagl.inputs.nixpkgs.follows = "nixpkgs";
-    # Pinned 2026-05-29: HEAD rev 2ae2172 (Claude Desktop 1.9659.2) fails to build —
-    # upstream patch step "[FAIL] addTrustedFolder anchor not found" (.asar guard).
-    # Un-pin once upstream fixes the patch regex (cf. the 2026-05-20 tray-menu break).
-    claude-desktop.url = "github:aaddrick/claude-desktop-debian/5dd948e96d853ed37636bc0e2368fc2665cd1104";
+    # Tracks upstream main. Upstream's addTrustedFolder .asar-guard patch can't find
+    # its anchor in Claude Desktop 1.9659.2+, which would abort the build; modules/apps/
+    # claude.nix patches the upstream source to make just that one (non-load-bearing)
+    # patch skip instead of exit 1. That override self-deactivates once upstream fixes
+    # the regex, so no re-pin is needed (cf. the 2026-05-20 tray-menu break).
+    claude-desktop.url = "github:aaddrick/claude-desktop-debian";
     claude-code-nix.url = "github:sadjow/claude-code-nix";
   };
 
