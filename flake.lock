@@ -9,16 +9,15 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1780372702,
-        "narHash": "sha256-VwUb9X/ytXiDzZol/znovRjt28e62Y9xqoc8hPjoxCM=",
+        "lastModified": 1780372639,
+        "narHash": "sha256-VFzXYHlIGwO4h4ovtnpZj9sX/Qu6+dlI00sXjHdwi2w=",
         "owner": "ezKEa",
         "repo": "aagl-gtk-on-nix",
-        "rev": "d7443a3e8b98c585c58ae47a3301b9b7e8f1e573",
+        "rev": "1ee1e8864a1fcfcc21a5fb5af4bd328b3c829f42",
         "type": "github"
       },
       "original": {
         "owner": "ezKEa",
-        "ref": "release-26.05",
         "repo": "aagl-gtk-on-nix",
         "type": "github"
       }
@@ -48,11 +47,11 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1780624122,
-        "narHash": "sha256-NeajPGABECK+ltSKT8MTy0+h760aHyRpzFKtfZqc8Ms=",
+        "lastModified": 1780685895,
+        "narHash": "sha256-13zh17+q8mzQ9vlU3Zpx/fWIk5bsei909qKV4UvB5gM=",
         "owner": "aaddrick",
         "repo": "claude-desktop-debian",
-        "rev": "4b6ff35236598725ba02bfb5acd57b4e531ee07f",
+        "rev": "1b31a41835b100d0c915962947384a62dd509233",
         "type": "github"
       },
       "original": {
@@ -120,16 +119,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1780361225,
-        "narHash": "sha256-wnV9ttf4fPWNonBIQmvlrSlNpQYgx5HgWWd007mwIFA=",
+        "lastModified": 1780679734,
+        "narHash": "sha256-KmRNvpNOb7QEORa06bVgjW9kITcx0VhsI7w0vhmZyD8=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "e28654b71096e08c019d4861ca26acb646f583d8",
+        "rev": "b2b7db486e06e098711dc291bb25db82850e1d16",
         "type": "github"
       },
       "original": {
         "owner": "nix-community",
-        "ref": "release-26.05",
+        "ref": "master",
         "repo": "home-manager",
         "type": "github"
       }

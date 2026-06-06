@@ -6,18 +6,18 @@
     impermanence.url = "github:nix-community/impermanence";
 
     home-manager = {
-      # Pinned 2026-05-30 to release-26.05 to match nixpkgs nixos-unstable (26.05).
-      # HM master jumped to 26.11 at the release boundary, tripping the version-mismatch
-      # warning. Bump to release-26.11 (or back to master) once nixpkgs reaches 26.11.
-      url = "github:nix-community/home-manager/release-26.05";
+      # Un-pinned 2026-06-05 back to master: nixpkgs nixos-unstable rolled over to
+      # 26.11, so the temporary release-26.05 pin (2026-05-30) became the stale side
+      # and tripped the mismatch warning. HM has no release-26.11 branch yet; master
+      # tracks unstable and reports 26.11 (release.json), matching nixpkgs.
+      url = "github:nix-community/home-manager/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Pinned 2026-06-01 to release-26.05 to match nixpkgs (26.05). aagl's main
-    # branch jumped to release 26.11 at the boundary, tripping its built-in
-    # nixpkgs-release mismatch warning. Bump to release-26.11 once nixpkgs reaches
-    # 26.11 (same story as the home-manager pin above).
-    aagl.url = "github:ezKEa/aagl-gtk-on-nix/release-26.05";
+    # Un-pinned 2026-06-05 back to main alongside home-manager: nixpkgs reached 26.11,
+    # so the temporary release-26.05 pin (2026-06-01) now mismatches. aagl has no
+    # release-26.11 branch; main declares aaglReleaseBranch = "26.11", matching nixpkgs.
+    aagl.url = "github:ezKEa/aagl-gtk-on-nix";
     aagl.inputs.nixpkgs.follows = "nixpkgs";
     # Tracks upstream main. Upstream's addTrustedFolder .asar-guard patch can't find
     # its anchor in Claude Desktop 1.9659.2+, which would abort the build; modules/apps/
