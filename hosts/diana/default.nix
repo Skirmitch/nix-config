@@ -28,17 +28,10 @@
   # ASUS motherboard EC sensors
   boot.kernelModules = [ "asus_ec_sensors" ];
 
-  # Pinned to 7.0.5: 7.0.8 regressed MT7921U BT (WMT cmd failure on init).
-  boot.kernelPackages = pkgs.linuxPackagesFor (pkgs.linux_latest.override {
-    argsOverride = rec {
-      version = "7.0.5";
-      modDirVersion = version;
-      src = pkgs.fetchurl {
-        url = "mirror://kernel/linux/kernel/v7.x/linux-${version}.tar.xz";
-        hash = "sha256-ll+wocFnU5n8YMYGOyJ8BSMEG1+aZitmRi8SEsQ4rDw=";
-      };
-    };
-  });
+  # Was pinned to 7.0.5: 7.0.8 regressed MT7921U BT (WMT func ctrl -22 on
+  # init). Fixed upstream ("btmtk: accept too short WMT FUNC_CTRL events"),
+  # present in 7.0.11 — unpinned 2026-06-08.
+  boot.kernelPackages = pkgs.linuxPackages_latest;
 
   system.nixos.label = nixosLabel;
   system.stateVersion = "25.11";
