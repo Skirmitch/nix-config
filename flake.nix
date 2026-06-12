@@ -24,7 +24,10 @@
     # claude.nix patches the upstream source to make just that one (non-load-bearing)
     # patch skip instead of exit 1. That override self-deactivates once upstream fixes
     # the regex, so no re-pin is needed (cf. the 2026-05-20 tray-menu break).
-    claude-desktop.url = "github:aaddrick/claude-desktop-debian";
+    # Pinned 2026-06-12: HEAD (d2ce046, app 1.12603.1) fatally fails its own
+    # --add-dir .asar filter patch (#649) — anchor matches twice in the new app.
+    # Un-pin once upstream adapts the patch script.
+    claude-desktop.url = "github:aaddrick/claude-desktop-debian/e85450c90ba38159f89f02bdd0f6c6d7e6bce065";
     claude-code-nix.url = "github:sadjow/claude-code-nix";
   };
 
