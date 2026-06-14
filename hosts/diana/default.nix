@@ -16,6 +16,7 @@
     ../../modules/gaming
     ../../modules/apps/claude.nix
     ../../modules/apps/docker.nix
+    ../../modules/apps/postgresql.nix
     ../../modules/apps/programming.nix
     ../../modules/apps/printing3d.nix
     ../../modules/apps/vr.nix

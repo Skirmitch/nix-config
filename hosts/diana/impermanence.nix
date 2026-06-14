@@ -33,6 +33,7 @@
       "/var/lib/wgnord"
       "/etc/wireguard"
       "/var/lib/docker"
+      "/var/lib/postgresql"
     ];
     files = [
       "/etc/machine-id"
