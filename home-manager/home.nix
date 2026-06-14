@@ -85,14 +85,18 @@
 
   programs.git = {
     enable = true;
-    userName = "Skirmitch";
-    userEmail = "skirmitch@gmail.com";
-    delta = {
-      enable = true;
-      options = {
-        navigate = true;
-        line-numbers = true;
-      };
+    settings.user = {
+      name = "Skirmitch";
+      email = "skirmitch@gmail.com";
+    };
+  };
+
+  programs.delta = {
+    enable = true;
+    enableGitIntegration = true;
+    options = {
+      navigate = true;
+      line-numbers = true;
     };
   };
 

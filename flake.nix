@@ -38,7 +38,13 @@
         raw = if builtins.pathExists labelPath
           then builtins.readFile labelPath
           else "default";
-        clean = builtins.replaceStrings ["\n" " " ":" "/"] ["" "_" "-" "-"] raw;
+        # Make readable substitutions first, then hard-filter to the charset
+        # system.nixos.label allows ([a-zA-Z0-9:_.-]) so stray chars like '+'
+        # can't break the build.
+        mapped = builtins.replaceStrings ["\n" " " "/"] ["" "_" "-"] raw;
+        chars = nixpkgs.lib.stringToCharacters mapped;
+        clean = builtins.concatStringsSep ""
+          (builtins.filter (c: builtins.match "[a-zA-Z0-9:_.-]" c != null) chars);
       in builtins.substring 0 50 clean;
 
       mkHost = hostName: nixpkgs.lib.nixosSystem {
