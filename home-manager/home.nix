@@ -83,5 +83,18 @@
     };
   };
 
+  programs.git = {
+    enable = true;
+    userName = "Skirmitch";
+    userEmail = "skirmitch@gmail.com";
+    delta = {
+      enable = true;
+      options = {
+        navigate = true;
+        line-numbers = true;
+      };
+    };
+  };
+
   programs.home-manager.enable = true;
 }

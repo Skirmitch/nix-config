@@ -11,7 +11,6 @@
     '';
   })
     vivaldi
-    git
     gedit
     btop
     nano
