@@ -19,15 +19,16 @@
     # release-26.11 branch; main declares aaglReleaseBranch = "26.11", matching nixpkgs.
     aagl.url = "github:ezKEa/aagl-gtk-on-nix";
     aagl.inputs.nixpkgs.follows = "nixpkgs";
-    # Tracks upstream main. Upstream's addTrustedFolder .asar-guard patch can't find
-    # its anchor in Claude Desktop 1.9659.2+, which would abort the build; modules/apps/
-    # claude.nix patches the upstream source to make just that one (non-load-bearing)
-    # patch skip instead of exit 1. That override self-deactivates once upstream fixes
-    # the regex, so no re-pin is needed (cf. the 2026-05-20 tray-menu break).
-    # Pinned 2026-06-12: HEAD (d2ce046, app 1.12603.1) fatally fails its own
-    # --add-dir .asar filter patch (#649) — anchor matches twice in the new app.
-    # Un-pin once upstream adapts the patch script.
-    claude-desktop.url = "github:aaddrick/claude-desktop-debian/e85450c90ba38159f89f02bdd0f6c6d7e6bce065";
+    # Tracks upstream main (unpinned). Upstream's reverse-engineered patches can
+    # abort the whole rebuild when a new minified Claude Desktop bundle breaks a
+    # patch's anchor/assertion. modules/apps/claude.nix builds from a patched copy
+    # of this source that makes those two known failure modes non-fatal (the
+    # non-load-bearing addTrustedFolder guard, and the #649 --add-dir filter's
+    # >1-match bail), so version bumps flow without blocking the rebuild. Both
+    # fixes self-deactivate once upstream adapts, so no re-pin is needed.
+    # Un-pinned 2026-06-15 (was pinned 2026-06-12 to e85450c for the #649
+    # double-match break, now absorbed by the override).
+    claude-desktop.url = "github:aaddrick/claude-desktop-debian";
     claude-code-nix.url = "github:sadjow/claude-code-nix";
   };
 
