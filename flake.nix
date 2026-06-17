@@ -19,16 +19,22 @@
     # release-26.11 branch; main declares aaglReleaseBranch = "26.11", matching nixpkgs.
     aagl.url = "github:ezKEa/aagl-gtk-on-nix";
     aagl.inputs.nixpkgs.follows = "nixpkgs";
-    # Tracks upstream main (unpinned). Upstream's reverse-engineered patches can
-    # abort the whole rebuild when a new minified Claude Desktop bundle breaks a
-    # patch's anchor/assertion. modules/apps/claude.nix builds from a patched copy
-    # of this source that makes those two known failure modes non-fatal (the
-    # non-load-bearing addTrustedFolder guard, and the #649 --add-dir filter's
-    # >1-match bail), so version bumps flow without blocking the rebuild. Both
-    # fixes self-deactivate once upstream adapts, so no re-pin is needed.
-    # Un-pinned 2026-06-15 (was pinned 2026-06-12 to e85450c for the #649
-    # double-match break, now absorbed by the override).
-    claude-desktop.url = "github:aaddrick/claude-desktop-debian";
+    # PINNED 2026-06-17 to the last version that actually LAUNCHES (1.12603.1).
+    # Upstream's reverse-engineered patches can break against a new minified
+    # bundle. modules/apps/claude.nix's build-time seds absorb the two known
+    # *build* failure modes (addTrustedFolder anchor, #649 --add-dir >1-match),
+    # but the 1.13576.0 bump (rev da341d, 2026-06-17) introduced a *runtime*
+    # break the build can't catch: the app builds fine, then hangs before
+    # app-ready and never opens a window (verified GPU on/off; our seds are
+    # no-ops against that rev, so it's upstream, not us). Pinning to 2d1d0c5
+    # (1.12603.1, 2026-06-15) — the previous, working version.
+    # UNPIN TEST when bumping the flake: override this input to HEAD, rebuild,
+    # then `CLAUDE_DISABLE_GPU=0 timeout 30 claude-desktop` and confirm
+    # ~/.config/Claude/logs/main.log gains a fresh "app-ready" line. If it does,
+    # drop the rev suffix below (back to bare ".../claude-desktop-debian") and
+    # re-pin only if a future bump regresses again. See claude.nix for the seds.
+    # History: un-pinned 2026-06-15; before that pinned 2026-06-12 to e85450c.
+    claude-desktop.url = "github:aaddrick/claude-desktop-debian/2d1d0c59ffb94c0de8a0c5627d03c28099599792";
     claude-code-nix.url = "github:sadjow/claude-code-nix";
   };
 
