@@ -1,6 +1,7 @@
 { pkgs, ... }: {
   home.packages = with pkgs; [
     jq
+    opencode
     (pkgs.symlinkJoin {
     name = "discord";
     paths = [ pkgs.discord ];

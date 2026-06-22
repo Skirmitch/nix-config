@@ -77,6 +77,8 @@
         ".local/share/Steam"
         ".claude"
         ".config/gh"
+        ".config/opencode"
+        ".local/share/opencode"
         ".local/share/keyrings"
        ];
       files = [
