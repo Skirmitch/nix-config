@@ -54,5 +54,8 @@ in
   environment.systemPackages = [
     pkgs.claude-desktop
     inputs.claude-code-nix.packages.${pkgs.stdenv.hostPlatform.system}.default
+    # claude-code's `/voice` records the mic via sox's `rec` when its native
+    # audio module doesn't load (the fallback path Diana hits). Recording only.
+    pkgs.sox
   ];
 }
