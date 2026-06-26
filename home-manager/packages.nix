@@ -21,6 +21,7 @@
     nvitop
     libreoffice
     obsidian
+    drawing
   ];
 
   xdg.desktopEntries.discord = {
