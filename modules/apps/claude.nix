@@ -46,9 +46,37 @@ in
     # Rebuild claude-desktop from the patched source above, overriding the
     # unpatched package the upstream overlay defines.
     (final: _prev: {
-      claude-desktop = final.callPackage "${claudeDesktopSrc}/nix/claude-desktop.nix" {
-        node-pty = final.callPackage "${claudeDesktopSrc}/nix/node-pty.nix" { };
-      };
+      claude-desktop =
+        let
+          base = final.callPackage "${claudeDesktopSrc}/nix/claude-desktop.nix" {
+            node-pty = final.callPackage "${claudeDesktopSrc}/nix/node-pty.nix" { };
+          };
+        in
+        # Force GPU acceleration on. The launcher (launcher-common.sh) latches
+        # into a persistent --disable-gpu mode the first time Chromium's GPU
+        # process hits a FATAL (error_code=1002 -> "GPU process isn't usable.
+        # Goodbye." — intermittent on this NVIDIA+Wayland+Electron stack), and
+        # it counts its own "disabling GPU" marker as a re-trigger, so it never
+        # self-recovers. Worse, this app version's --disable-gpu path also kills
+        # the software rasterizer, so the "recovery" launch dies immediately
+        # with an unhandled "GPU access not allowed" (exit 143) and no window
+        # ever appears. The latch's fallback is therefore pure downside here.
+        # CLAUDE_DISABLE_GPU=0 forces GPU on and bypasses the sticky check
+        # (build_electron_args takes the `-v CLAUDE_DISABLE_GPU` branch, leaving
+        # _disable_gpu=false and skipping _previous_launch_hit_gpu_fatal). The
+        # launcher resolves its libs by absolute store path, so wrapping the
+        # entrypoint is safe. Diagnosed 2026-06-26 after a reboot left the latch
+        # tripped. Drop this wrap once upstream's recovery path stops disabling
+        # the software rasterizer alongside the GPU.
+        final.symlinkJoin {
+          name = "claude-desktop-gpu-on-${base.version or ""}";
+          paths = [ base ];
+          nativeBuildInputs = [ final.makeWrapper ];
+          postBuild = ''
+            wrapProgram $out/bin/claude-desktop --set CLAUDE_DISABLE_GPU 0
+          '';
+          inherit (base) meta;
+        };
     })
   ];
   environment.systemPackages = [
