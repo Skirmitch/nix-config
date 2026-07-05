@@ -1,84 +1,43 @@
 { inputs, pkgs, ... }:
-let
-  # We build claude-desktop from a patched copy of the upstream source so that a
-  # new Claude Desktop bundle can't abort the whole NixOS rebuild when one of
-  # upstream's reverse-engineered patches fails to match the new minified code.
-  # Two independent hardenings, both self-deactivating on healthy versions:
-  #
-  # 1. addTrustedFolder .asar-guard (config.sh): can't find its anchor in
-  #    1.9659.2+, which aborts with "[FAIL] addTrustedFolder anchor not found".
-  #    That patch is only a hardening guard against .asar paths in
-  #    LocalAgentMode/cowork trusted folders — NOT load-bearing for launching or
-  #    normal use — so we make just that failure path skip (exit 0) instead of
-  #    aborting (exit 1). The sed targets only the line *after* the addTrustedFolder
-  #    FAIL message, leaving the config-write patch's identical exit(1) untouched.
-  #
-  # 2. #649 --add-dir .asar filter (config.sh sub-patch 1): finds the --add-dir
-  #    dispatch loop by regex, then bails (exit 1) if the matched code appears
-  #    more than once. App 1.12603.1's minifier duplicated that loop, so it
-  #    matches twice -> "FATAL: --add-dir pattern matches 2 times (expected 1)".
-  #    This patch IS load-bearing (local agent mode crashes without it), so we
-  #    don't skip it — we make it correct for the duplicate case: drop the >1
-  #    fatal (`allMatches.length > 1` -> `false`, so the guard never fires) and
-  #    turn the single replace into a replace-all so EVERY --add-dir push loop
-  #    gets the .asar filter (filtering .asar from any such loop is always safe).
-  #
-  # Both seds are inert on healthy single-match versions: the addTrustedFolder
-  # exit path is never reached, the >1 guard was already false at 1 match, and
-  # split/join == replace for a single occurrence. So no manual cleanup is
-  # needed once upstream adapts these patches — the input tracks HEAD unpinned.
-  claudeDesktopSrc = pkgs.applyPatches {
-    name = "claude-desktop-debian-patch-failsafe";
-    src = inputs.claude-desktop;
-    postPatch = ''
-      sed -i '/\[FAIL\] addTrustedFolder anchor not found/{n;s/process\.exit(1)/process.exit(0)/}' \
-        scripts/patches/config.sh
-      sed -i \
-        -e 's/allMatches.length > 1/false/' \
-        -e 's/code = code\.replace(match\[0\], filtered);/code = code.split(match[0]).join(filtered);/' \
-        scripts/patches/config.sh
-    '';
-  };
-in
 {
-  nixpkgs.overlays = [
-    inputs.claude-desktop.overlays.default
-    # Rebuild claude-desktop from the patched source above, overriding the
-    # unpatched package the upstream overlay defines.
-    (final: _prev: {
-      claude-desktop =
-        let
-          base = final.callPackage "${claudeDesktopSrc}/nix/claude-desktop.nix" {
-            node-pty = final.callPackage "${claudeDesktopSrc}/nix/node-pty.nix" { };
-          };
-        in
-        # Force GPU acceleration on. The launcher (launcher-common.sh) latches
-        # into a persistent --disable-gpu mode the first time Chromium's GPU
-        # process hits a FATAL (error_code=1002 -> "GPU process isn't usable.
-        # Goodbye." — intermittent on this NVIDIA+Wayland+Electron stack), and
-        # it counts its own "disabling GPU" marker as a re-trigger, so it never
-        # self-recovers. Worse, this app version's --disable-gpu path also kills
-        # the software rasterizer, so the "recovery" launch dies immediately
-        # with an unhandled "GPU access not allowed" (exit 143) and no window
-        # ever appears. The latch's fallback is therefore pure downside here.
-        # CLAUDE_DISABLE_GPU=0 forces GPU on and bypasses the sticky check
-        # (build_electron_args takes the `-v CLAUDE_DISABLE_GPU` branch, leaving
-        # _disable_gpu=false and skipping _previous_launch_hit_gpu_fatal). The
-        # launcher resolves its libs by absolute store path, so wrapping the
-        # entrypoint is safe. Diagnosed 2026-06-26 after a reboot left the latch
-        # tripped. Drop this wrap once upstream's recovery path stops disabling
-        # the software rasterizer alongside the GPU.
-        final.symlinkJoin {
-          name = "claude-desktop-gpu-on-${base.version or ""}";
-          paths = [ base ];
-          nativeBuildInputs = [ final.makeWrapper ];
-          postBuild = ''
-            wrapProgram $out/bin/claude-desktop --set CLAUDE_DISABLE_GPU 0
-          '';
-          inherit (base) meta;
-        };
-    })
-  ];
+  # Claude Desktop for Linux, via aaddrick/claude-desktop-debian.
+  #
+  # As of upstream v3.0.0 (PR #763, 2026-07-04) this package is a repackage of
+  # Anthropic's OFFICIAL Linux .deb: fetchurl + dpkg + autoPatchelfHook, keeping
+  # the vendored Electron ELF (like nixpkgs' discord/vscode). It is NOT the old
+  # reverse-engineered rebuild that patched minified code. That retirement is the
+  # whole reason this module shrank: the failure class we spent months pinning
+  # and sed-failsafing around — "an upstream patch stopped matching the new
+  # bundle, aborting the rebuild" and "app 1.14271 hangs before app-ready on the
+  # Windows-only readRegistryValues() call (#729)" — simply does not exist when
+  # we ship Anthropic's own tested binary. Verified 2026-07-05 on Diana: builds
+  # clean, launches, reaches app-ready in ~1s.
+  #
+  # What we therefore DROPPED versus the pre-v3 module:
+  #   - the applyPatches + two seds against scripts/patches/config.sh (guarded
+  #     the old minified-code patches; no such patching now).
+  #   - the node-pty callPackage (nix/node-pty.nix is gone; the .deb is prebuilt).
+  #   - the CLAUDE_DISABLE_GPU=0 makeWrapper (there is no aaddrick launcher script
+  #     anymore; the NVIDIA+Wayland EGL/GPU crash-loop is fixed upstream in
+  #     nix/claude-desktop.nix via glvnd/EGL appendRunpaths + a VK_ADD_DRIVER_FILES
+  #     wrapper — a proper fix, not our env-var latch bypass).
+  #
+  # So this is now just: pull in upstream's overlay, install its package. Input
+  # tracks HEAD unpinned again (see flake.nix). If a future bump ever misbehaves,
+  # test in isolation first:
+  #   nix build github:aaddrick/claude-desktop-debian#claude-desktop
+  #   <result>/bin/claude-desktop --user-data-dir=$(mktemp -d)   # look for app-ready
+  #
+  # Bare `claude-desktop` vs `claude-desktop-fhs`: upstream's default is the -fhs
+  # variant, a buildFHSEnv that puts nodejs/uv/docker (for MCP servers) and
+  # qemu_kvm/OVMF (for Cowork's VM guest) on the app's runtime PATH. We install
+  # the BARE app instead — it matches the non-FHS setup Diana has always run, and
+  # avoids qemu_kvm's ~1.5 GB closure for a Cowork VM feature we don't use. Swap
+  # pkgs.claude-desktop -> pkgs.claude-desktop-fhs below if you want Cowork's VM
+  # or guaranteed node/uv/docker for npx/uvx-spawned MCP servers. (The overlay
+  # defines both attrs, so either name resolves.)
+  nixpkgs.overlays = [ inputs.claude-desktop.overlays.default ];
+
   environment.systemPackages = [
     pkgs.claude-desktop
     inputs.claude-code-nix.packages.${pkgs.stdenv.hostPlatform.system}.default
