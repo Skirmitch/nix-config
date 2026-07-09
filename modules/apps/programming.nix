@@ -15,6 +15,7 @@
     nodejs
     jetbrains.rust-rover
     sqlite
+    duckdb
     file
     poetry
     gh
