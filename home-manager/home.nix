@@ -9,6 +9,7 @@
   # dconf cursor keys (cursor-theme='' / cursor-size=0), which leaves GNOME
   # with the white-square X11 fallback. This re-asserts a real theme on rebuild.
   home.pointerCursor = {
+    enable = true;
     gtk.enable = true;
     name = "Adwaita";
     package = pkgs.adwaita-icon-theme;
