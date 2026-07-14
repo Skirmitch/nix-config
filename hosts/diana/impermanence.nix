@@ -80,6 +80,15 @@
         ".config/opencode"
         ".local/share/opencode"
         ".local/share/keyrings"
+        # ON1 Photo RAW via Lutris/GE-Proton: the Wine prefix (~/Games/…)
+        # holds ON1's license activation, settings, and catalog DB — losing
+        # it on reboot means reactivating and recataloguing. Runners
+        # (GE-Proton) and the Lutris game DB live under .local/share/lutris.
+        "Games"
+        ".local/share/lutris"
+        ".config/lutris"
+        ".local/share/umu"
+        ".config/pupgui"
        ];
       files = [
         ".gitconfig"
