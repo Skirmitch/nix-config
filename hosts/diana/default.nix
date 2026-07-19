@@ -23,6 +23,7 @@
     ../../modules/apps/sunshine.nix
     ../../modules/apps/immersed.nix
     ../../modules/apps/on1-photoraw.nix
+    ../../modules/apps/g9cam.nix
   ];
 
   networking.hostName = "Diana";
