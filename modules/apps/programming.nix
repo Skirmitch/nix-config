@@ -1,4 +1,19 @@
-{ pkgs, ... }: {
+{ pkgs, ... }:
+let
+  # Generation-stable path to the Nix-patched Chromium that ships with
+  # playwright-test's browser bundle. The Playwright MCP (npx @playwright/mcp)
+  # defaults to the "chrome" channel = /opt/google/chrome, which can't exist
+  # on NixOS — its config instead passes
+  # --executable-path /run/current-system/sw/bin/playwright-chromium,
+  # which this keeps pointing at the current bundle across nixpkgs bumps.
+  playwright-chromium-bin = pkgs.runCommand "playwright-chromium-bin" { } ''
+    mkdir -p $out/bin
+    chrome=$(echo ${pkgs.playwright-driver.browsers}/chromium-*/chrome-linux*/chrome)
+    [ -x "$chrome" ] || { echo "no chromium in playwright browsers bundle" >&2; exit 1; }
+    ln -s "$chrome" $out/bin/playwright-chromium
+  '';
+in
+{
   # --- PROGRAMMING / DEV TOOLS ---
 
   # Run dynamically-linked binaries from Poetry/pip wheels (manylinux PIEs that
@@ -20,6 +35,7 @@
     poetry
     gh
     playwright-test
+    playwright-chromium-bin
     shellcheck
     sentry-cli
     openssl
