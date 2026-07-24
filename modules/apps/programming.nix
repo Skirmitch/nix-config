@@ -12,6 +12,24 @@ let
     [ -x "$chrome" ] || { echo "no chromium in playwright browsers bundle" >&2; exit 1; }
     ln -s "$chrome" $out/bin/playwright-chromium
   '';
+
+  # virtualenv 21 dropped the bundled pip/setuptools seed wheels for Python
+  # < 3.9 (BUNDLE_SUPPORT now starts at 3.9). Poetry's test suite builds its
+  # fake interpreter with MockEnv(version_info=(3, 7, 0)), so get_embed_wheel
+  # returns None and poetry raises "embedded pip wheel not found" — three
+  # tests in tests/installation/test_executor.py fail and take the whole
+  # system-path build down with them.
+  #
+  # Verified test-only: get_embed_wheel("pip", v) resolves fine for every
+  # real interpreter (3.9 -> pip-26.0.1, 3.13/3.14 -> pip-26.1.2) and only
+  # returns None for the fictional 3.7/3.8. The poetry binary is unaffected.
+  # Drop this once upstream poetry stops pinning MockEnv to 3.7.
+  poetry-skip-py37-mockenv-tests = pkgs.poetry.overridePythonAttrs (old: {
+    disabledTests = (old.disabledTests or [ ]) ++ [
+      "test_execute_executes_a_batch_of_operations"
+      "test_execute_prints_warning_for_yanked_package"
+    ];
+  });
 in
 {
   # --- PROGRAMMING / DEV TOOLS ---
@@ -32,7 +50,7 @@ in
     sqlite
     duckdb
     file
-    poetry
+    poetry-skip-py37-mockenv-tests
     gh
     playwright-test
     playwright-chromium-bin
