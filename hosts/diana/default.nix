@@ -13,10 +13,12 @@
     ../../modules/system/fonts.nix
     ../../modules/system/input.nix
     ../../modules/system/users.nix
+    ../../modules/system/swap.nix
     ../../modules/gaming
     ../../modules/apps/claude.nix
     ../../modules/apps/docker.nix
     ../../modules/apps/postgresql.nix
+    ../../modules/apps/redis.nix
     ../../modules/apps/programming.nix
     ../../modules/apps/printing3d.nix
     ../../modules/apps/vr.nix
