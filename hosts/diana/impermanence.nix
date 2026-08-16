@@ -32,6 +32,11 @@
       "/etc/NetworkManager/system-connections"
       "/var/lib/wgnord"
       "/etc/wireguard"
+      # Tailscale node key + machine identity. Without this the node
+      # re-registers on every boot and comes back as diana-1, diana-2, …
+      "/var/lib/tailscale"
+      # gnome-remote-desktop's system daemon state (remote-login side).
+      "/var/lib/gnome-remote-desktop"
       "/var/lib/docker"
       "/var/lib/postgresql"
     ];
@@ -71,6 +76,10 @@
         ".config/wivrn"
         ".config/openxr"
         ".config/sunshine"
+        # RDP TLS keypair for desktop sharing. Losing it means the phone's
+        # RDP client warns about a changed certificate after every reboot.
+        # (The RDP password itself lives in .local/share/keyrings, above.)
+        ".local/share/gnome-remote-desktop"
         ".android"
         ".config/SideQuest"
         ".steam"

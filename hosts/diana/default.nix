@@ -8,6 +8,7 @@
     ../../modules/system/nvidia.nix
     ../../modules/system/audio.nix
     ../../modules/system/networking.nix
+    ../../modules/system/tailscale.nix
     ../../modules/system/vpn-hotspot.nix
     ../../modules/system/hotspot.nix
     ../../modules/system/fonts.nix
@@ -23,6 +24,7 @@
     ../../modules/apps/printing3d.nix
     ../../modules/apps/vr.nix
     ../../modules/apps/sunshine.nix
+    ../../modules/apps/remote-desktop.nix
     ../../modules/apps/immersed.nix
     ../../modules/apps/on1-photoraw.nix
     ../../modules/apps/g9cam.nix
