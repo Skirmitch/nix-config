@@ -22,6 +22,10 @@
     libreoffice
     obsidian
     drawing
+    # Zoom's FHS sandbox can't see the host's xdg-desktop-portal, and on
+    # Wayland screen capture only works through the portal. nixpkgs defaults
+    # gnomeXdgDesktopPortalSupport to false, so share-screen silently fails.
+    (zoom-us.override { gnomeXdgDesktopPortalSupport = true; })
   ];
 
   xdg.desktopEntries.discord = {

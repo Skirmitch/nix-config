@@ -70,7 +70,15 @@
         ".config/OrcaSlicer"
         ".config/libreoffice"
         ".config/obsidian"
+        # Zoom keeps its signed-in session, chat history, and local
+        # recordings in ~/.zoom; ~/.config/zoomus.conf holds the client
+        # settings (audio/video device picks, view prefs). Without both,
+        # every reboot means logging in and reconfiguring devices again.
+        ".zoom"
        ];
+      files = [
+        ".config/zoomus.conf"
+      ];
     };
   };
 }
