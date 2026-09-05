@@ -71,6 +71,11 @@
         ".aws"
         ".config/cura"
         ".config/OrcaSlicer"
+        # FreeCAD: user.cfg/system.cfg prefs under .config; Mod/, Macro/, the
+        # Addon Manager cache and the MCP addon's freecad_mcp_settings.json
+        # (auto-start RPC toggle) under .local/share.
+        ".config/FreeCAD"
+        ".local/share/FreeCAD"
         ".config/libreoffice"
         ".config/obsidian"
         ".config/wivrn"

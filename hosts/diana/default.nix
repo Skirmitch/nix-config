@@ -22,6 +22,7 @@
     ../../modules/apps/redis.nix
     ../../modules/apps/programming.nix
     ../../modules/apps/printing3d.nix
+    ../../modules/apps/freecad.nix
     ../../modules/apps/vr.nix
     ../../modules/apps/sunshine.nix
     ../../modules/apps/remote-desktop.nix
