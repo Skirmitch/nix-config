@@ -76,6 +76,7 @@
         # (auto-start RPC toggle) under .local/share.
         ".config/FreeCAD"
         ".local/share/FreeCAD"
+        ".config/LibreCAD"
         ".config/libreoffice"
         ".config/obsidian"
         ".config/wivrn"

@@ -94,6 +94,16 @@ let
   # every call. Scoped onto FreeCAD's PATH rather than system-wide; each
   # makeWrapper token is a separate list element because freecad-utils quotes
   # them individually.
+  #
+  # QT_QPA_PLATFORM=xcb: on GNOME Wayland + NVIDIA 595 the native Qt6 wayland
+  # path segfaults FreeCAD 1.1.3 reproducibly (2 of 2 runs, 2026-09-05) the
+  # moment a TechDraw page is recomputed while it is the active MDI view —
+  # "Coin warning in cc_glglue_instance(): Error when setting up the GL
+  # context" then SIGSEGV in libc. The same script run under XWayland (xcb)
+  # completed cleanly, sheets exported, 3D view reactivated. TechDraw sheets
+  # are the whole point of the architecture workflow, so we pin xcb here
+  # rather than tell every script to avoid page recomputes. Revisit on a Qt or
+  # FreeCAD bump: drop the two tokens and rerun the TechDraw smoke test.
   freecad-with-mcp = pkgs.freecad.customize {
     modules = [ "${src}/addon/FreeCADMCP" ];
     makeWrapperFlags = [
@@ -101,6 +111,9 @@ let
       "PATH"
       ":"
       "${lib.makeBinPath [ pkgs.calculix-ccx ]}"
+      "--set"
+      "QT_QPA_PLATFORM"
+      "xcb"
     ];
   };
 in
