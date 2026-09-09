@@ -30,6 +30,10 @@ in
     opencomposite    # older OpenVR -> OpenXR translator, kept as fallback
   ];
 
+  # adb for the Galaxy Z Fold 7 (vendor 04e8, hc-sync sideloads) rides on
+  # android-tools above plus systemd 258's generic uaccess rule; nixpkgs
+  # removed programs.adb for exactly that reason (checked 2026-09-08).
+
   # Explicit USB access for Meta/Oculus devices (vendor ID 2833 = Quest 3).
   # systemd 258's generic uaccess rule matches by interface class, so this is
   # belt-and-suspenders for adb / SideQuest device access.

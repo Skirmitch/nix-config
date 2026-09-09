@@ -32,6 +32,13 @@
     # (1.12603.1) 2026-06-17; un-pinned 2026-06-15; pinned e85450c 2026-06-12.
     claude-desktop.url = "github:aaddrick/claude-desktop-debian";
     claude-code-nix.url = "github:sadjow/claude-code-nix";
+
+    # Health Connect pipeline (store side): ~/Projects/hc-sync exposes
+    # packages.hc-store and packages.datasette; modules/apps/health-store.nix
+    # consumes them. A path input is re-copied on `nix flake update`, which
+    # is the intended way to roll a new version onto the box.
+    hc-sync.url = "path:/home/skirmitch/Projects/hc-sync";
+    hc-sync.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = { self, nixpkgs, home-manager, impermanence, aagl, ... }@inputs:

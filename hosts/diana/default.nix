@@ -30,6 +30,7 @@
     ../../modules/apps/immersed.nix
     ../../modules/apps/on1-photoraw.nix
     ../../modules/apps/g9cam.nix
+    ../../modules/apps/health-store.nix
   ];
 
   networking.hostName = "Diana";
