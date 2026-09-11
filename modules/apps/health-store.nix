@@ -55,7 +55,8 @@ in {
       EnvironmentFile = "-${stateDir}/env";
       Environment = [ "HC_DB=${stateDir}/hc.sqlite" "HC_INBOX_DIR=${stateDir}/inbox" "HOME=/home/skirmitch" ];
       ExecStart = "${hc.hc-store}/bin/hc-import run";
-      # 2,880 runs a day would be noise; only warnings/errors reach the journal.
+      # 96 runs a day would be noise; the importer prefixes WARN/ERROR with
+      # <4>/<3> so they pass this filter, INFO does not.
       LogLevelMax = "notice";
     };
   };
@@ -104,9 +105,20 @@ in {
       Group = "users";
       Restart = "on-failure";
       RestartSec = "10s";
-      ExecStartPre = "${hc.hc-store}/bin/hc-import --db ${stateDir}/hc.sqlite --inbox ${stateDir}/inbox init";
-      # Two -h flags are not supported, so bind to all and firewall? No: bind
-      # to the tailnet IP only; loopback users go through the tailnet IP too.
+      ExecStartPre = [
+        # Seen 2026-09-09 18:30:32 at boot: "could not bind on any address" -
+        # tailscaled was up but the interface had no address yet. Wait for it
+        # (bounded) instead of relying on Restart= to win the race.
+        (pkgs.writeShellScript "wait-tailnet-ip" ''
+          for _ in $(seq 60); do
+            ${pkgs.iproute2}/bin/ip -4 addr show dev tailscale0 2>/dev/null | grep -q '${tailnetIp}' && exit 0
+            sleep 1
+          done
+          echo "tailscale0 has no ${tailnetIp} after 60s; starting anyway" >&2
+        '')
+        "${hc.hc-store}/bin/hc-import --db ${stateDir}/hc.sqlite --inbox ${stateDir}/inbox init"
+      ];
+      # Bind to the tailnet IP only; loopback users go through the tailnet IP too.
       ExecStart = "${hc.datasette}/bin/datasette serve ${stateDir}/hc.sqlite -h ${tailnetIp} -p 8001 --metadata ${hc.hc-store.datasetteMetadata} --setting sql_time_limit_ms 5000 --setting max_returned_rows 5000 --setting default_page_size 100";
       Environment = [ "HC_DB=${stateDir}/hc.sqlite" ];
     };
