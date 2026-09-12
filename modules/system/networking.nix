@@ -20,7 +20,7 @@
   services.udev.extraRules = ''
   ACTION=="add", SUBSYSTEM=="bluetooth", TEST=="power/control", ATTR{power/control}="on"
   '';
-  environment.systemPackages = [ pkgs.wgnord pkgs.dnsutils pkgs.iw ];
+  environment.systemPackages = [ pkgs.dnsutils pkgs.iw ];  # wgnord: see nordvpn.nix
   services.tlp.enable = false;  # just in case
   systemd.tmpfiles.rules = [
     "w /sys/module/bluetooth/parameters/disable_ertm - - - - 1"

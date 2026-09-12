@@ -15,6 +15,11 @@
     enable = true;
     openFirewall = true;   # UDP 41641, the direct-connection port; without it
                            # sessions fall back to the slower DERP relays
+    # nordvpn.nix hands DNS to the Nord tunnel with `tailscale set
+    # --accept-dns=false` while it is up and restores it on disconnect. A
+    # reboot mid-VPN would skip the restore and leave MagicDNS off, so the
+    # flag is re-asserted at every boot (tailscaled-set.service).
+    extraSetFlags = [ "--accept-dns=true" ];
   };
 
   # Treat the mesh as trusted. Everything on tailscale0 is an authenticated

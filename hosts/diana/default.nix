@@ -9,6 +9,7 @@
     ../../modules/system/audio.nix
     ../../modules/system/networking.nix
     ../../modules/system/tailscale.nix
+    ../../modules/system/nordvpn.nix
     ../../modules/system/vpn-hotspot.nix
     ../../modules/system/hotspot.nix
     ../../modules/system/fonts.nix
