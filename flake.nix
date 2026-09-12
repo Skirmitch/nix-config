@@ -37,6 +37,13 @@
     # packages.hc-store and packages.datasette; modules/apps/health-store.nix
     # consumes them. A path input is re-copied on `nix flake update`, which
     # is the intended way to roll a new version onto the box.
+    # `path:` copies the working tree verbatim - .gitignore and all, including
+    # .git - so it used to ship 84 MB of Android build intermediates to
+    # /nix/store on every lock (finding 36, v3 63). Build outputs now live in
+    # ~/.cache/hc-sync (android/build.gradle.kts + gradle.properties), which
+    # keeps the copy at ~1 MB. Switch to git+file:///home/skirmitch/Projects/hc-sync
+    # once the repo has its first commit: that copies tracked files only and
+    # gives the deployed system a revision to be identified by.
     hc-sync.url = "path:/home/skirmitch/Projects/hc-sync";
     hc-sync.inputs.nixpkgs.follows = "nixpkgs";
   };

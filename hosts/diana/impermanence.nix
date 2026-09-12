@@ -29,6 +29,14 @@
       "/var/lib/bluetooth"
       "/var/lib/nixos"
       "/var/lib/systemd/coredump"
+      # systemd's timer stamp files. Every `Persistent = true` timer on this box
+      # was silently neutered without this: Persistent= replays a missed
+      # OnCalendar= trigger by comparing the wall clock against a stamp file in
+      # /var/lib/systemd/timers, which lived on the wiped @root and was recreated
+      # empty at every boot. So a nightly job missed while the box was off was
+      # never caught up - fstrim.timer and nix-gc.timer as much as hc-backup.timer
+      # (v3 finding 60; verified: every stamp file's mtime was the last boot).
+      "/var/lib/systemd/timers"
       "/etc/NetworkManager/system-connections"
       "/var/lib/wgnord"
       "/etc/wireguard"
