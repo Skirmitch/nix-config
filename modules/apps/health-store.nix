@@ -172,10 +172,10 @@ in {
     wants = [ "network-online.target" ];
     wantedBy = [ "multi-user.target" ];
     unitConfig = requiresStore // {
-      # Retry forever and quietly: the only reason ExecStart gives up is "the
-      # tailnet address is not up yet", which is a wait, not a fault. With the
-      # default rate limiter (5 starts / 10 s) a 90 s wait never trips it
-      # anyway, so this only removes a trap for a future shorter timeout.
+      # Retry forever and quietly: the only reason the start sequence gives up
+      # is "the tailnet address is not up yet", which is a wait, not a fault.
+      # With the default rate limiter (5 starts / 10 s) a 90 s wait never trips
+      # it anyway, so this only removes a trap for a future shorter timeout.
       StartLimitIntervalSec = 0;
     };
     serviceConfig = hardening // {
@@ -185,43 +185,76 @@ in {
       ProtectHome = true;
       Restart = "on-failure";
       RestartSec = "30s";
-      # This is now the ONLY path that creates or upgrades the schema: since the
-      # DDL is gated on a schema hash, running it on every start (including the
-      # 30 s retries below) is a no-op, not the 14-view drop/recreate churn it
-      # used to be. `hc-import init --force` is the manual repair.
+      # /run/datasette, created at every start and owned by skirmitch:users,
+      # removed when the unit stops. ProtectSystem=strict mounts the whole
+      # hierarchy read-only, but RuntimeDirectory= is exempt by construction -
+      # systemd.exec(5) under ProtectSystem=: "StateDirectory=, LogsDirectory=,
+      # ... and related directory settings (see below) also exclude the specific
+      # directories from the effect of ProtectSystem=". It is the handoff
+      # between the two Exec* phases below; nothing else uses it.
+      RuntimeDirectory = "datasette";
+      # The tailnet wait lives in start-pre and is bounded at 90 s; the DEFAULT
+      # start timeout is also exactly 90 s, so without this the unit would be
+      # killed by the timeout in the same second the loop gives up and the
+      # exit-75 line would never be logged.
+      TimeoutStartSec = "150s";
       ExecStartPre = [
+        # `init` is the ONLY path that creates or upgrades the schema: since the
+        # DDL is gated on a schema hash, running it on every start (including
+        # the 30 s retries below) is a no-op, not the 14-view drop/recreate
+        # churn it used to be. `hc-import init --force` is the manual repair.
         "${hc.hc-store}/bin/hc-import --db ${stateDir}/hc.sqlite --inbox ${stateDir}/inbox init"
+        # THE WAIT BELONGS HERE, NOT IN ExecStart: a Type=simple unit is active
+        # the moment the shell forks, so with the loop inside ExecStart the unit
+        # read `active (running)` for up to 90 s while nothing listened on 8001,
+        # and with tailscale down it cycled active(90 s) -> failed -> active,
+        # i.e. `systemctl is-active datasette` said yes ~75 % of the time. In
+        # start-pre the unit stays `activating (start-pre)` for the wait, so
+        # `systemctl is-active` means listening. (Same class of defect as the
+        # green-but-idle hc-import timer above.)
+        (pkgs.writeShellScript "datasette-wait-tailnet" ''
+          set -u
+          for _ in $(${pkgs.coreutils}/bin/seq 90); do
+            ip=$(${pkgs.tailscale}/bin/tailscale ip -4 2>/dev/null \
+                 | ${pkgs.gnugrep}/bin/grep -m1 -E '^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]+\.[0-9]+$') || ip=""
+            if [ -n "$ip" ]; then
+              printf '%s\n' "$ip" > "$RUNTIME_DIRECTORY/ip"
+              echo "<6>tailnet address $ip written to $RUNTIME_DIRECTORY/ip" >&2
+              exit 0
+            fi
+            ${pkgs.coreutils}/bin/sleep 1
+          done
+          echo "<3>no 100.64.0.0/10 address from 'tailscale ip -4' after 90s; retrying in 30s" >&2
+          exit 75
+        '')
       ];
       # Bind the tailnet address, NEVER 0.0.0.0: networking.nix also trusts the
       # hotspot interface, so a wildcard bind would hand the health database to
       # any hotspot client. Today that address is 100.99.204.36 (the value the
       # runbook tells you to open), but it is DERIVED at start, not pinned:
-      # `tailscale ip -4` is asked for it, and only a 100.64.0.0/10 answer is
-      # accepted. Seen 2026-09-09 18:30:32: "could not bind on any address" at
-      # boot because tailscaled was up but the interface had no address yet.
-      # A re-registration (loss of /persist/var/lib/tailscale) or a tailnet
-      # migration used to mean editing this file; now it just works.
-      # The unprivileged call is fine: tailscaled.sock is 0666 and connect(2) is
-      # exempt from ProtectSystem=strict's read-only check.
-      # Exit 75 (EX_TEMPFAIL) + Restart=on-failure = retry every 30 s forever.
+      # `tailscale ip -4` is asked for it by the start-pre above, and only a
+      # 100.64.0.0/10 answer is accepted. Seen 2026-09-09 18:30:32: "could not
+      # bind on any address" at boot because tailscaled was up but the interface
+      # had no address yet. A re-registration (loss of /persist/var/lib/tailscale)
+      # or a tailnet migration used to mean editing this file; now it just works.
+      # The unprivileged `tailscale` call is fine: tailscaled.sock is 0666 and
+      # connect(2) is exempt from ProtectSystem=strict's read-only check.
+      # Exit 75 (EX_TEMPFAIL) from EITHER phase + Restart=on-failure (which
+      # covers a failed ExecStartPre) = retry every 30 s forever.
       ExecStart = pkgs.writeShellScript "datasette-tailnet" ''
         set -u
-        for _ in $(${pkgs.coreutils}/bin/seq 90); do
-          ip=$(${pkgs.tailscale}/bin/tailscale ip -4 2>/dev/null \
-               | ${pkgs.gnugrep}/bin/grep -m1 -E '^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]+\.[0-9]+$') || ip=""
-          if [ -n "$ip" ]; then
-            echo "<6>binding Datasette to tailnet address $ip" >&2
-            exec ${hc.datasette}/bin/datasette serve ${stateDir}/hc.sqlite \
-              -h "$ip" -p 8001 \
-              --metadata ${hc.hc-store.datasetteMetadata} \
-              --setting sql_time_limit_ms 5000 \
-              --setting max_returned_rows 5000 \
-              --setting default_page_size 100
-          fi
-          ${pkgs.coreutils}/bin/sleep 1
-        done
-        echo "<3>no 100.64.0.0/10 address from 'tailscale ip -4' after 90s; retrying in 30s" >&2
-        exit 75
+        ip=$(${pkgs.coreutils}/bin/cat "$RUNTIME_DIRECTORY/ip" 2>/dev/null) || ip=""
+        if [ -z "$ip" ]; then
+          echo "<3>no address in $RUNTIME_DIRECTORY/ip; retrying in 30s" >&2
+          exit 75
+        fi
+        echo "<6>binding Datasette to tailnet address $ip" >&2
+        exec ${hc.datasette}/bin/datasette serve ${stateDir}/hc.sqlite \
+          -h "$ip" -p 8001 \
+          --metadata ${hc.hc-store.datasetteMetadata} \
+          --setting sql_time_limit_ms 5000 \
+          --setting max_returned_rows 5000 \
+          --setting default_page_size 100
       '';
       Environment = [ "HC_DB=${stateDir}/hc.sqlite" ];
     };
