@@ -104,6 +104,33 @@ let
   # are the whole point of the architecture workflow, so we pin xcb here
   # rather than tell every script to avoid page recomputes. Revisit on a Qt or
   # FreeCAD bump: drop the two tokens and rerun the TechDraw smoke test.
+  #
+  # ifcopenshell 0.8.0 (FreeCAD's BIM/IFC backend, in nixpkgs freecad's
+  # pythonDeps; also in cad-tools.nix's arqPython env) does not compile against
+  # boost 1.91, which landed with the 2026-09-11 nixpkgs (staging-next
+  # 2026-09-05): boost's new "union" optional has an explicit forwarding
+  # constructor, and the profile mappings brace-initialise the fillet radius
+  # (`{{x,y},{f}}`), which copy-list-init forbids through an explicit ctor.
+  # nixpkgs issue #562782, no fix in nixpkgs or IfcOpenShell as of
+  # 2026-09-13. The patch (see its header) rewrites the 45 sites to plain
+  # copy-init — semantics unchanged. Applied through pythonPackagesExtensions
+  # (the overlay below) so every python3 package set — FreeCAD's and
+  # cad-tools' — gets the same patched derivation; only ifcopenshell and its
+  # two consumers rebuild. When nixpkgs ships a fixed ifcopenshell the patch
+  # will fail to apply — that is the signal to delete this overlay and the
+  # .patch file.
+  ifcopenshellBoost191Overlay = _final: prev: {
+    pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
+      (_pyFinal: pyPrev: {
+        ifcopenshell = pyPrev.ifcopenshell.overrideAttrs (old: {
+          patches = (old.patches or [ ]) ++ [
+            ./ifcopenshell-0.8.0-boost-1.91-explicit-optional.patch
+          ];
+        });
+      })
+    ];
+  };
+
   freecad-with-mcp = pkgs.freecad.customize {
     modules = [ "${src}/addon/FreeCADMCP" ];
     makeWrapperFlags = [
@@ -119,6 +146,8 @@ let
 in
 {
   # --- FREECAD + MCP ---
+  nixpkgs.overlays = [ ifcopenshellBoost191Overlay ];
+
   environment.systemPackages = [
     freecad-with-mcp
     freecad-mcp

@@ -1,0 +1,197 @@
+ifcopenshell 0.8.0 vs boost 1.91: profile_point aggregate initializers.
+
+Boost 1.91 switched boost::optional to the "union" implementation, whose
+perfect-forwarding value constructor `optional(U&&)` is `explicit`. The
+profile-definition mappings build `profile_point { std::array<double,2> xy;
+boost::optional<double> radius; }` with `{{x,y},{f}}`, and the inner `{f}` is
+copy-list-initialization, where an explicit constructor being selected is
+ill-formed (GCC: "converting to 'boost::optional<double>' from initializer
+list would use explicit constructor"). Plain copy-initialization from the
+double (`{{x,y},f}`) never considers the explicit overload and picks the
+non-explicit `optional(const T&)`, so this is a pure syntax change: same
+value, same semantics, compiles on boost <= 1.89 too.
+
+nixpkgs issue: https://github.com/NixOS/nixpkgs/issues/562782
+Generated 2026-09-13 with
+  sed -E 's/\},[[:space:]]*\{[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\}[[:space:]]*\}/},\1}/g'
+over the eight src/ifcgeom/mapping/*ProfileDef.cpp files that use the pattern
+(45 sites). Not yet upstream (IfcOpenShell master carries the same code).
+
+diff -ru a/src/ifcgeom/mapping/IfcCShapeProfileDef.cpp b/src/ifcgeom/mapping/IfcCShapeProfileDef.cpp
+--- a/src/ifcgeom/mapping/IfcCShapeProfileDef.cpp
++++ b/src/ifcgeom/mapping/IfcCShapeProfileDef.cpp
+@@ -57,17 +57,17 @@
+ 	}
+ 
+ 	return profile_helper(m4, {
+-		{{-x,-y},{f2}},
+-		{{x,-y},{f2}},
++		{{-x,-y},f2},
++		{{x,-y},f2},
+ 		{{x,-y + d2}},
+ 		{{x - d1,-y + d2}},
+-		{{x - d1,-y + d1},{f1}},
+-		{{-x + d1,-y + d1},{f1}},
+-		{{-x + d1,y - d1},{f1}},
+-		{{x - d1,y - d1},{f1}},
++		{{x - d1,-y + d1},f1},
++		{{-x + d1,-y + d1},f1},
++		{{-x + d1,y - d1},f1},
++		{{x - d1,y - d1},f1},
+ 		{{x - d1,y - d2}},
+ 		{{x,y - d2}},
+-		{{x,y},{f2}},
+-		{{-x,y},{f2}}
++		{{x,y},f2},
++		{{-x,y},f2}
+ 	});
+ }
+diff -ru a/src/ifcgeom/mapping/IfcIShapeProfileDef.cpp b/src/ifcgeom/mapping/IfcIShapeProfileDef.cpp
+--- a/src/ifcgeom/mapping/IfcIShapeProfileDef.cpp
++++ b/src/ifcgeom/mapping/IfcIShapeProfileDef.cpp
+@@ -97,15 +97,15 @@
+ 	return profile_helper(m4, {
+ 		{{-x1,-y}},
+ 		{{x1,-y}},
+-		{{x1,-y + ft1}, {fe1}},
+-		{{d1,-y + ft1 + dy},{ f1} },
+-		{{d1,y - ft2 - dy},{f2} },
+-		{{x2,y - ft2}, {fe2}},
++		{{x1,-y + ft1},fe1},
++		{{d1,-y + ft1 + dy},f1},
++		{{d1,y - ft2 - dy},f2},
++		{{x2,y - ft2},fe2},
+ 		{{x2,y}},
+ 		{{-x2,y}},
+-		{{-x2,y - ft2}, {fe2}},
+-		{{-d1,y - ft2 - dy},{f2} },
+-		{{-d1,-y + ft1 + dy},{f1} },
+-		{{-x1,-y + ft1}, {fe1}}
++		{{-x2,y - ft2},fe2},
++		{{-d1,y - ft2 - dy},f2},
++		{{-d1,-y + ft1 + dy},f1},
++		{{-x1,-y + ft1},fe1}
+ 	});
+ }
+diff -ru a/src/ifcgeom/mapping/IfcLShapeProfileDef.cpp b/src/ifcgeom/mapping/IfcLShapeProfileDef.cpp
+--- a/src/ifcgeom/mapping/IfcLShapeProfileDef.cpp
++++ b/src/ifcgeom/mapping/IfcLShapeProfileDef.cpp
+@@ -97,9 +97,9 @@
+ 	return profile_helper(m4, {
+ 		{{-x,-y}},
+ 		{{x,-y}},
+-		{{x,-y + d - dy1},{f2} },
+-		{{xx, xy},{f1} },
+-		{{-x + d - dx1,y},{f2} },
++		{{x,-y + d - dy1},f2},
++		{{xx, xy},f1},
++		{{-x + d - dx1,y},f2},
+ 		{{-x,y}}
+ 	});
+ }
+diff -ru a/src/ifcgeom/mapping/IfcRectangleHollowProfileDef.cpp b/src/ifcgeom/mapping/IfcRectangleHollowProfileDef.cpp
+--- a/src/ifcgeom/mapping/IfcRectangleHollowProfileDef.cpp
++++ b/src/ifcgeom/mapping/IfcRectangleHollowProfileDef.cpp
+@@ -51,17 +51,17 @@
+ 	}
+ 
+ 	auto s1 = profile_helper(m4, {
+-		{{-x ,-y},{ r1} },
+-		{{x, -y}, {r1} },
+-		{{x, y}, {r1} },
+-		{{-x, y}, {r1} }
++		{{-x ,-y},r1},
++		{{x, -y},r1},
++		{{x, y},r1},
++		{{-x, y},r1}
+ 	});
+ 
+ 	auto s2 = profile_helper(m4, {
+-		{{-x + d, -y + d}, { r2}},
+-		{{x - d, -y + d}, { r2}},
+-		{{x - d, y - d}, { r2}},
+-		{{-x + d, y - d}, { r2}}
++		{{-x + d, -y + d},r2},
++		{{x - d, -y + d},r2},
++		{{x - d, y - d},r2},
++		{{-x + d, y - d},r2}
+ 	});
+ 
+ 	if (!s1 || !s2) {
+diff -ru a/src/ifcgeom/mapping/IfcRoundedRectangleProfileDef.cpp b/src/ifcgeom/mapping/IfcRoundedRectangleProfileDef.cpp
+--- a/src/ifcgeom/mapping/IfcRoundedRectangleProfileDef.cpp
++++ b/src/ifcgeom/mapping/IfcRoundedRectangleProfileDef.cpp
+@@ -45,9 +45,9 @@
+ 	}
+ 
+ 	return profile_helper(m4, {
+-		{{-x,-y}, {r}},
+-		{{x,-y}, {r}},
+-		{{x,y}, {r}},
+-		{{-x,y}, {r}}
++		{{-x,-y},r},
++		{{x,-y},r},
++		{{x,y},r},
++		{{-x,y},r}
+ 	});
+ }
+diff -ru a/src/ifcgeom/mapping/IfcTShapeProfileDef.cpp b/src/ifcgeom/mapping/IfcTShapeProfileDef.cpp
+--- a/src/ifcgeom/mapping/IfcTShapeProfileDef.cpp
++++ b/src/ifcgeom/mapping/IfcTShapeProfileDef.cpp
+@@ -109,13 +109,13 @@
+ 	}
+ 
+ 	return profile_helper(m4, {
+-		{{d1 / 2. - dx2,-y},{ f2} },
+-		{{xx,xy},{ f1}},
+-		{{x,y - d2 + dy2},{ f3}},
++		{{d1 / 2. - dx2,-y},f2},
++		{{xx,xy},f1},
++		{{x,y - d2 + dy2},f3},
+ 		{{x,y}},
+ 		{{-x,y}},
+-		{{-x,y - d2 + dy2},{f3}},
+-		{{-xx,xy},{f1}},
+-		{{-d1 / 2. + dx2,-y},{f2}}
++		{{-x,y - d2 + dy2},f3},
++		{{-xx,xy},f1},
++		{{-d1 / 2. + dx2,-y},f2}
+ 	});
+ }
+diff -ru a/src/ifcgeom/mapping/IfcUShapeProfileDef.cpp b/src/ifcgeom/mapping/IfcUShapeProfileDef.cpp
+--- a/src/ifcgeom/mapping/IfcUShapeProfileDef.cpp
++++ b/src/ifcgeom/mapping/IfcUShapeProfileDef.cpp
+@@ -70,10 +70,10 @@
+ 	return profile_helper(m4, {
+ 		{{-x,-y}},
+ 		{{x,-y}},
+-		{{x,-y + d2 - dy2},{f2} },
+-		{{-x + d1,-y + d2 + dy1},{ f1}},
+-		{{-x + d1,y - d2 - dy1},{ f1}},
+-		{{x,y - d2 + dy2},{ f2}},
++		{{x,-y + d2 - dy2},f2},
++		{{-x + d1,-y + d2 + dy1},f1},
++		{{-x + d1,y - d2 - dy1},f1},
++		{{x,y - d2 + dy2},f2},
+ 		{{x,y}},
+ 		{{-x,y}}
+ 	});
+diff -ru a/src/ifcgeom/mapping/IfcZShapeProfileDef.cpp b/src/ifcgeom/mapping/IfcZShapeProfileDef.cpp
+--- a/src/ifcgeom/mapping/IfcZShapeProfileDef.cpp
++++ b/src/ifcgeom/mapping/IfcZShapeProfileDef.cpp
+@@ -61,11 +61,11 @@
+ 	return profile_helper(m4, {
+ 		{{-dx,-y}},
+ 		{{x,-y}},
+-		{{x,-y + dy},{ f2}},
+-		{{dx,-y + dy},{ f1}},
++		{{x,-y + dy},f2},
++		{{dx,-y + dy},f1},
+ 		{{dx,y}},
+ 		{{-x,y}},
+-		{{-x,y - dy},{ f2}},
+-		{{-dx,y - dy},{ f1}}
++		{{-x,y - dy},f2},
++		{{-dx,y - dy},f1}
+ 	});
+ }

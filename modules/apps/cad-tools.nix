@@ -10,6 +10,7 @@ let
   #   numpy        — the arithmetic behind memorias de cálculo.
   #   ifcopenshell — read the IFC that FreeCAD exports, outside FreeCAD (so a
   #                  reviewer agent can audit walls/openings without the GUI).
+  #                  Carries the boost-1.91 patch from freecad.nix's overlay.
   #   reportlab    — programmatic PDF (cuadros de superficies, anexos) when typst
   #                  is overkill.
   # hiPrio so this env's bin/python3 wins over the plain python3 that other
