@@ -3,6 +3,19 @@ let
   hc = inputs.hc-sync.packages.${pkgs.system};
   stateDir = "/var/lib/health";
 
+  # The ONE place the public name lives. It is this node's MagicDNS name
+  # (`tailscale status --json | jq -r .Self.DNSName`, minus the trailing dot),
+  # it is the Host header every Funnel request arrives with, and it is therefore
+  # what health-mcp-http must accept (see HEALTH_MCP_ALLOWED_HOSTS below). If the
+  # tailnet is ever renamed or the node re-registers under another name, this
+  # line and the connector URL in claude.ai are the two things to change.
+  funnelHost = "diana.tail64ce4a.ts.net";
+  # The secret path is NOT here and never will be: it is the only credential of
+  # the public endpoint, so it lives in ${stateDir}/mcp-http.env (0600), outside
+  # the world-readable /nix/store. docs/runbook.md creates it.
+  mcpEnvFile = "${stateDir}/mcp-http.env";
+  mcpPort = 8002;
+
   # Sandbox shared by the three units. Datasette is the reason it exists: it is
   # the only long-lived network listener here, it accepts arbitrary SQL from any
   # tailnet peer, and skirmitch is in wheel - so a bug in Datasette or one of its
@@ -260,6 +273,157 @@ in {
     };
   };
   # tailscale0 is a trusted interface (tailscale.nix), so no port opening here.
+
+  # --- REMOTE MCP: the same tools, over HTTPS, for the phone ---
+  #
+  # The Claude phone app only speaks to REMOTE connectors (no stdio), so the only
+  # way to ask about his own health data from the couch is an HTTP MCP endpoint.
+  # Chain: claude.ai -> Tailscale Funnel (TLS terminated on the tailnet edge, node
+  # ${funnelHost}) -> 127.0.0.1:${toString mcpPort} -> health-mcp-http, which is the SAME
+  # FastMCP instance as the stdio `health-mcp` (imported, never redefined), so a
+  # tool behaves identically in Claude Code and on the phone.
+  #
+  # THE URL IS THE PASSWORD. A claude.ai custom connector cannot send custom
+  # headers and OAuth is out of scope, so authentication is a secret path prefix:
+  # HEALTH_MCP_PATH=/mcp-<32 hex> in the EnvironmentFile. Funnel knows nothing
+  # about it - it proxies the WHOLE root - and the app answers a bare 404 with a
+  # zero-length body to every path that does not start with the secret, so a
+  # scanner cannot tell this hostname apart from an empty web server. Rotation is
+  # one line in the env file + `systemctl restart` + a new connector URL
+  # (docs/runbook.md, "Remote MCP for the phone / claude.ai").
+  systemd.services.health-mcp-http = {
+    # The description is deliberately a sentence about the env file: systemd's
+    # failure line is literally "Failed to start <Description>", and a missing
+    # EnvironmentFile fails the unit BEFORE any Exec* line runs - there is no
+    # ExecStartPre that could print a friendlier message, because the exec
+    # context (env files included) is built first, for every Exec* phase alike.
+    description = "health-mcp over Streamable HTTP (needs the secret path in ${mcpEnvFile})";
+    documentation = [ "file://${mcpEnvFile}" "file:///home/skirmitch/Projects/hc-sync/docs/runbook.md" ];
+    # Loopback only: nothing here waits for the network, and `tailscale funnel`
+    # connects from this same machine. var-lib-health.mount is spelled out even
+    # though RequiresMountsFor= already implies Requires= + After= on it
+    # (systemd.unit(5)): one grep in the generated unit then shows the ordering.
+    after = [ "var-lib-health.mount" ];
+    wantedBy = [ "multi-user.target" ];
+    unitConfig = requiresStore;
+    serviceConfig = hardening // {
+      User = "skirmitch";
+      Group = "users";
+      # Reads one database and writes the `events` table; nothing in $HOME, and
+      # no outbound network at all (the AF_INET/AF_INET6 in `hardening` are for
+      # the listening socket, AF_UNIX/AF_NETLINK for glibc's name lookups).
+      ProtectHome = true;
+      # NO `-` PREFIX, ON PURPOSE. Without the file the unit must refuse to
+      # start: a health server on the public internet with no credential is the
+      # one failure mode that must never degrade gracefully.
+      EnvironmentFile = mcpEnvFile;
+      Environment = [
+        "HC_DB=${stateDir}/hc.sqlite"
+        "HEALTH_MCP_HOST=127.0.0.1"
+        "HEALTH_MCP_PORT=${toString mcpPort}"
+        # MANDATORY, and the one setting a deploy gets wrong silently: the MCP
+        # SDK's DNS-rebinding middleware validates the Host header against an
+        # exact list (mcp/server/transport_security.py `_validate_host`), whose
+        # built-in entries are all loopback. Through Funnel the Host is the
+        # PUBLIC name, so without this line every remote request gets 421 while
+        # every localhost test passes. Both spellings are listed because that
+        # matcher is exact-match plus a `host:*` pattern that ONLY matches a Host
+        # WITH a port: a client that sends `Host: ${funnelHost}:443` would be
+        # rejected by the bare entry alone.
+        "HEALTH_MCP_ALLOWED_HOSTS=${funnelHost},${funnelHost}:*"
+      ];
+      ExecStart = "${hc.hc-store}/bin/health-mcp-http";
+      # No RestartSec: with the default 100 ms a missing/short HEALTH_MCP_PATH
+      # (exit 2) burns the default start limit (5 starts / 10 s) in a second and
+      # the unit STAYS `failed`, which is the loud signal - `systemctl --failed`
+      # shows it. A 30 s RestartSec would instead hide it in an endless polite
+      # retry loop, the same defect as the green-but-idle hc-import timer above.
+      Restart = "on-failure";
+    };
+  };
+
+  # Publishing it. `tailscale funnel` needs root or an operator, so this is a
+  # root oneshot rather than a line in the runbook that asks for operator rights
+  # on a daily-driver account.
+  #
+  # RemainAfterExit=yes because there is no daemon here: the command writes the
+  # serve/funnel config into tailscaled's state, which is persisted
+  # (/persist/var/lib/tailscale, hosts/diana/impermanence.nix), so the endpoint
+  # survives reboots WITHOUT this unit - the unit exists to declare the config in
+  # the flake and to make an unenabled funnel visible.
+  systemd.services.health-mcp-funnel = {
+    description = "Publish health-mcp-http on the internet via Tailscale Funnel";
+    documentation = [ "https://tailscale.com/kb/1223/funnel" ];
+    # After=, NOT Requires=: Requires propagates STOP, so the documented rotation
+    # (`systemctl restart health-mcp-http`) would drop this oneshot to `inactive`
+    # while the funnel config kept serving from tailscaled's state - a status
+    # that lies forever after the first rotation. A backend that is down is a 502
+    # from Tailscale's edge, not an exposure.
+    after = [ "tailscaled.service" "health-mcp-http.service" ];
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      # Type=oneshot has NO start timeout by default (systemd.service(5)), and
+      # this CLI does block: when control answers "not enabled for this node" it
+      # prints the enable link and then WAITS on the IPN bus for the attribute to
+      # appear (the `<feature>_awaiting_enablement` counter in the binary; there
+      # is no "waiting" message to grep for - the block is silent). Without this
+      # line the unit would sit in `activating` forever and multi-user.target
+      # would never finish. 150s covers the 90 s wait below plus the LocalAPI
+      # round trip, and turns that block into: link, then "start operation timed
+      # out", then `failed` - both lines in the journal. Unreachable today: this
+      # node's CapMap already carries funnel + https + funnel-ports 443,8443,10000.
+      TimeoutStartSec = "150s";
+      # The unit is a single root CLI call that talks to tailscaled over
+      # /var/run/tailscale/tailscaled.sock and writes nothing: connect(2) is
+      # exempt from ProtectSystem=strict's read-only check (the datasette
+      # wrapper above relies on the same fact), so a read-only root filesystem
+      # costs nothing here. The store `hardening` block is deliberately NOT
+      # reused: it is about keeping a network listener away from the health
+      # database, which is not this unit's job.
+      NoNewPrivileges = true;
+      PrivateTmp = true;
+      ProtectHome = true;
+      ProtectSystem = "strict";
+      # After=tailscaled.service means the DAEMON is up, not that the netmap has
+      # arrived; the funnel CLI reads this node's capabilities (the control plane
+      # grants `funnel` + `https` + funnel-ports) before it will write a config,
+      # and at early boot that map is still empty - which the CLI cannot tell
+      # apart from "funnel is not enabled for this tailnet", i.e. a spurious
+      # permanent failure (Restart=no) on every boot. Verified live on 2026-09-12:
+      # once BackendState is Running, Self.CapMap carries `funnel`, `https` and
+      # funnel-ports?ports=443,8443,10000. Same class of race as the datasette
+      # tailnet wait, same shape of fix.
+      ExecStartPre = pkgs.writeShellScript "funnel-wait-tailnet" ''
+        set -u
+        state=""
+        for _ in $(${pkgs.coreutils}/bin/seq 90); do
+          state=$(${pkgs.tailscale}/bin/tailscale status --json 2>/dev/null \
+                  | ${pkgs.jq}/bin/jq -r '.BackendState // empty') || state=""
+          if [ "$state" = "Running" ]; then
+            echo "<6>tailscaled backend Running; configuring funnel" >&2
+            exit 0
+          fi
+          ${pkgs.coreutils}/bin/sleep 1
+        done
+        echo "<3>tailscaled BackendState=$state after 90s, not Running; funnel config left untouched" >&2
+        exit 75
+      '';
+      # Probed against the installed CLI (tailscale 1.102.3, `tailscale funnel
+      # --help`): subcommands are status/reset, flags --bg --https --set-path
+      # --yes. --set-path=/ is the DEFAULT mount and is written out only as
+      # documentation of the model: the whole root is proxied, tailscale never
+      # learns the secret path, and the app 404s everything that is not it.
+      # --yes keeps a future confirmation prompt from blocking a unit with no tty.
+      # If funnel is not enabled for this node the CLI prints the control plane's
+      # enable link and exits non-zero; Restart=no keeps that line as the last
+      # thing in `journalctl -u health-mcp-funnel`, which is exactly where the
+      # runbook sends you. After enabling it: `sudo systemctl start health-mcp-funnel`.
+      ExecStart = "${pkgs.tailscale}/bin/tailscale funnel --bg --yes --https=443 --set-path=/ http://127.0.0.1:${toString mcpPort}";
+      Restart = "no";
+    };
+  };
 
   # health-status: one-screen summary, also what to run when "nothing arrived".
   # `hc-import status` is genuinely read-only now (it opens file:...?mode=ro and
