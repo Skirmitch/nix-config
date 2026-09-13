@@ -16,19 +16,27 @@ let
       [ "$(busctl get-property org.bluez "$DEV" org.bluez.Device1 Connected 2>/dev/null | awk '{print $2}')" = true ]
     }
 
-    # Structural signature (see the module comment). Exit 0 healthy, 1 broken,
-    # 2 not connected. Prints one line either way.
-    check() {
-      connected || { echo "not connected"; return 2; }
-      local tree sr good bad
+    # The D-Bus shape of the connection, as CONTEXT for the log line — it does
+    # not decide health (see the module comment: with the 5.87 cache patch a
+    # headset-initiated connect still yields a sep-less transport path and
+    # ServicesResolved=false, and audio flows).
+    shape() {
+      local tree sr good bad st
       tree=$(busctl tree org.bluez --list --no-pager 2>/dev/null | grep -F "$DEV/")
       sr=$(busctl get-property org.bluez "$DEV" org.bluez.Device1 ServicesResolved 2>/dev/null | awk '{print $2}')
       good=$(grep -cE "^$DEV/sep[0-9]+/fd[0-9]+$" <<<"$tree")
       bad=$(grep -cE "^$DEV/fd[0-9]+$" <<<"$tree")
-      if [ "$bad" = 0 ] && [ "$good" -ge 1 ] && [ "$sr" = true ]; then
-        echo "healthy: transport under remote endpoint, services resolved"; return 0
-      fi
-      echo "BROKEN: services_resolved=''${sr:-?} endpoint_transports=$good orphan_transports=$bad"; return 1
+      st=$(for t in $(grep -E "^$DEV(/sep[0-9]+)?/fd[0-9]+$" <<<"$tree"); do busctl get-property org.bluez "$t" org.bluez.MediaTransport1 State 2>/dev/null | awk '{print $2}'; done | tr -d '"' | paste -sd, -)
+      echo "services_resolved=''${sr:-?} endpoint_transports=$good orphan_transports=$bad transport_state=''${st:-none}"
+    }
+
+    # Health = PipeWire can acquire the transport and stream through it: 0.4 s
+    # of digital silence into the sink, 12 s timeout, sub-second when healthy.
+    # Exit 0 healthy, 1 dead, 2 not connected. Prints one line either way.
+    check() {
+      connected || { echo "not connected"; return 2; }
+      if probe; then echo "healthy: transport acquired, audio flows ($(shape))"; return 0; fi
+      echo "DEAD: transport not acquirable ($(shape))"; return 1
     }
 
     probe() {  # try to acquire the transport: 0.4 s of silence, 12 s worst case
@@ -44,9 +52,7 @@ let
       fmt=$(pactl list short sinks 2>/dev/null | grep -F "$SINK" | cut -f4-)
       printf 'profile   : %s\n' "''${prof:-<card absent>}"
       printf 'format    : %s\n' "''${fmt:-<no sink>}"
-      printf 'structure : %s\n' "$(check)"
-      if probe; then printf 'transport : OK — audio really flows\n'; return 0
-      else           printf 'transport : DEAD — profile lies (orphan transport, or the phone holds the stream)\n'; return 1; fi
+      printf 'transport : %s\n' "$(check)"
     }
 
     reclaim() {
@@ -59,7 +65,7 @@ let
     }
 
     watch() {
-      log "watching $MAC: on Connected=true wait ''${SETTLE}s, check, reclaim once if broken"
+      log "watching $MAC: on Connected=true wait ''${SETTLE}s, probe the transport, reclaim once if dead"
       local last=0 now out
       gdbus monitor --system --dest org.bluez --object-path "$DEV" 2>/dev/null \
       | grep --line-buffered -E "PropertiesChanged \('org.bluez.Device1', \{.*'Connected': <true>" \
@@ -67,7 +73,11 @@ let
           now=$(date +%s)
           if [ $((now - last)) -lt "$COOLDOWN" ]; then log "connected again inside the cooldown, ignoring"; continue; fi
           log "connected, settling ''${SETTLE}s"; sleep "$SETTLE"
-          if out=$(check); then log "$out"; continue; fi
+          out=$(check); rc=$?
+          case $rc in
+            0) log "$out"; continue ;;
+            2) log "not connected at settle (the headset flaps on power-on); waiting for its next connect"; continue ;;
+          esac
           log "$out -> reclaiming"
           last=$(date +%s)
           bluetoothctl disconnect "$MAC" >/dev/null 2>&1; sleep 4; bluetoothctl connect "$MAC" >/dev/null 2>&1
@@ -128,27 +138,29 @@ in
   #  1. Multipoint (2026-08-26): the phone holds the A2DP stream, BlueZ
   #     refuses the PC's transport with org.bluez.Error.NotAuthorized after
   #     "a2dp-sink profile connect failed: Device or resource busy".
-  #  2. Orphan transport (2026-09-13, the "works only after I reconnect it in
-  #     Settings" case): when the headphones power on and initiate the
-  #     connection themselves, BlueZ 5.87 configures the A2DP stream before it
-  #     has registered the remote endpoints, so the MediaTransport1 object is
-  #     created directly under the device path (dev_X/fd0 — transport.c falls
-  #     back to device_get_path() when remote_endpoint is NULL) instead of
-  #     under the endpoint (dev_X/sep6/fd0), Device1.ServicesResolved stays
-  #     false, and every PipeWire Acquire on it returns NotAuthorized
-  #     ("Failure in Bluetooth audio transport", node running -> error). The
-  #     sink shows Active Profile a2dp-sink, s16le 2ch 48000Hz, SUSPENDED —
-  #     healthy-looking. When the PC initiates (manual reconnect) the transport
-  #     lands under sep6 and bluetoothd logs "sep6/fd0: fd(N) ready".
-  #     "load_remote_sep() Unable to load LastUsed: rseid 6 not found" appears
-  #     in BOTH cases and is not the discriminator.
+  #  2. BlueZ 5.87 cache regression (2026-09-13, the "works only after I
+  #     reconnect it in Settings" case; patched in networking.nix). When the
+  #     headphones power on and initiate the connection, bluetoothd configures
+  #     the stream before it has resolved the remote endpoint, so the
+  #     MediaTransport1 object lands at dev_X/fd0 instead of dev_X/sep6/fd0
+  #     and Device1.ServicesResolved stays false. UNPATCHED that transport was
+  #     "active" with a stale owner and every PipeWire Acquire returned
+  #     NotAuthorized ("Failure in Bluetooth audio transport", node running ->
+  #     error) while the card kept reporting a2dp-sink / s16le 2ch 48000Hz.
+  #     PATCHED (measured 2026-09-13 11:30 on a real power-on): the transport
+  #     still has the sep-less path and ServicesResolved=false, but it is
+  #     "idle", PipeWire acquires it in under a second, and audio flows.
   #
-  # So the PROFILE IS NOT A HEALTH CHECK. `bose check` reads the structural
-  # signature off D-Bus (fast, silent); `bose status` additionally tries to
-  # acquire the transport by playing 0.4 s of silence (the only honest test,
-  # 12 s worst case). `bose watch` is the daemon behind the bose-watch user
-  # service below: on every Connected=true it waits for the link to settle,
-  # runs `check`, and reclaims once if broken — the manual ritual, automated.
+  # Lessons encoded below: the PROFILE IS NOT A HEALTH CHECK, and neither is
+  # the D-Bus shape — only acquiring the transport is. `bose check` plays 0.4 s
+  # of digital silence into the sink (sub-second when healthy, 12 s timeout
+  # when dead) and prints the shape as context. `bose status` adds the
+  # profile/format lines. `bose watch` is the daemon behind the bose-watch user
+  # service: on every Connected=true it waits for the link to settle, runs
+  # `check`, and reclaims once only if the probe fails — the manual ritual,
+  # automated, and silent on a healthy connect. (An earlier revision reclaimed
+  # on the shape alone; with the patched daemon that was a false positive on
+  # every connect: a 4 s audio hiccup for nothing.)
   environment.systemPackages = with pkgs; [
     pulseaudio paprefs pavucontrol
     boseHelper

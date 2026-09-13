@@ -25,7 +25,10 @@
     # the device path (dev_X/fd0) instead of the endpoint (dev_X/sep6/fd0),
     # ServicesResolved stays false, PipeWire's Acquire gets NotAuthorized,
     # and the headphones are "connected but silent" until a PC-initiated
-    # reconnect. Live on Diana 2026-09-13. Upstream fix "a2dp: Fix loading of
+    # reconnect. Live on Diana 2026-09-13. With the patch the sep-less path
+    # and ServicesResolved=false persist on headset-initiated connects, but
+    # the transport is idle and acquirable and audio flows (verified 11:30
+    # the same day). Upstream fix "a2dp: Fix loading of
     # remote SEP from cache" (3f0cffa8df57, 2026-07-10) is in no release yet;
     # carried here on the daemon package only (nothing else links the daemon,
     # so no mass rebuild). Drop the patch when nixpkgs ships bluez > 5.87 —
