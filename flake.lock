@@ -101,8 +101,8 @@
         ]
       },
       "locked": {
-        "lastModified": 1789260784,
-        "narHash": "sha256-TPTBryIDSgbnNXSDPDmIMswKHx/RN5DIEVPxzFx9jgo=",
+        "lastModified": 1789263873,
+        "narHash": "sha256-LZuV4BKyR8KbRY33wXyL5XSHLAGsbASM57Gtsrtq6g4=",
         "path": "/home/skirmitch/Projects/hc-sync",
         "type": "path"
       },
