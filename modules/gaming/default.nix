@@ -3,6 +3,19 @@
 
   # --- GAMING ---
   programs.steam.enable = true;
+  # Inside Steam's FHS sandbox only what is listed here is visible, so the two
+  # Vulkan layers go through extraPackages rather than systemPackages:
+  #   mangohud — the FPS/frametime/GPU/VRAM overlay; per-game launch option
+  #              `mangohud %command%` (tuning KCD1 2026-09-13 needed real numbers,
+  #              the in-game counter shows nothing about frametimes or VRAM).
+  #   vkbasalt — post-process layer (CAS sharpening, optional SMAA/FXAA) for
+  #              games whose temporal AA blurs (KCD1's SMAA 2TX); inert unless
+  #              a launch option sets ENABLE_VKBASALT=1, config in
+  #              ~/.config/vkBasalt/vkBasalt.conf.
+  programs.steam.extraPackages = with pkgs; [ mangohud vkbasalt ];
+  # `gamemoderun %command%`: CPU governor to performance + niceness for the
+  # game process while it runs; harmless when unused.
+  programs.gamemode.enable = true;
   hardware.xpadneo.enable = true;
   boot.extraModprobeConfig = ''
   options bluetooth disable_ertm=1
