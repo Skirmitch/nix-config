@@ -101,8 +101,8 @@
         ]
       },
       "locked": {
-        "lastModified": 1789463493,
-        "narHash": "sha256-d4jV7HIX9GbJKDfzYMkIcnqdlbc2TwnPDmMNN9Zo71I=",
+        "lastModified": 1789484103,
+        "narHash": "sha256-w0kHig9HIMRAUwB8T4J9F7Gl3ZIyP78jaqgOUPU4k2c=",
         "path": "/home/skirmitch/Projects/hc-sync",
         "type": "path"
       },
@@ -118,11 +118,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1789430117,
-        "narHash": "sha256-t+U1mijItLJ64xZOifpfQ17kpAL73nU7pDI48ScacVc=",
+        "lastModified": 1789482455,
+        "narHash": "sha256-pD3qVlQ4mUCFoTWrYtxecpSitQMsgJvJIN0FUIDZoEU=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "cda90fd8838825c689fde9d3f3b4e937937790df",
+        "rev": "efa3ccb4c3cc90d832eab232976379058fa75aa3",
         "type": "github"
       },
       "original": {
