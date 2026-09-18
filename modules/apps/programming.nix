@@ -1,14 +1,53 @@
 { pkgs, ... }:
 let
-  # Generation-stable path to the Nix-patched Chromium that ships with
-  # playwright-test's browser bundle. The Playwright MCP (npx @playwright/mcp)
-  # defaults to the "chrome" channel = /opt/google/chrome, which can't exist
-  # on NixOS — its config instead passes
-  # --executable-path /run/current-system/sw/bin/playwright-chromium,
-  # which this keeps pointing at the current bundle across nixpkgs bumps.
+  # --- PLAYWRIGHT: CHROMIUM ONLY ---
+  #
+  # nixpkgs' playwright browser bundle builds chromium + firefox + webkit, and
+  # on the nixpkgs locked 2026-09-17 playwright-webkit does not build at all:
+  # auto-patchelf cannot satisfy libmanette-0.2.so.0, wanted by
+  # libWPEWebKit-2.0.so.1.12.0 (the WPE port links the gamepad library, the
+  # derivation does not list it). That failure propagates through
+  # playwright-browsers -> playwright-test -> system-path -> toplevel, so a
+  # plain `dif` could not build the system at all.
+  #
+  # Upstream fixed it on master on 2026-09-16 ("playwright-webkit: add missing
+  # libmanette", 67bf9043b1) but the fix had NOT reached the nixos-unstable
+  # channel this flake follows as of the locked rev a32edd765.
+  #
+  # The fix here is not a workaround though, it is what this machine actually
+  # wants: nothing on Diana has ever driven firefox or webkit. The Playwright
+  # MCP (npx @playwright/mcp) drives chromium and only chromium. So both
+  # consumers below are pinned to the chromium-only bundle, which dodges the
+  # broken derivation, cuts the closure, and makes future firefox/webkit
+  # breakage unable to take the system build down. Revisit only if something
+  # ever genuinely needs the other two engines.
+
+  # playwright-test is the `playwright` CLI. Its wrapper bakes
+  # PLAYWRIGHT_BROWSERS_PATH to playwright-core.passthru.browsers -- the FULL
+  # bundle -- and that attribute is not overridable from outside, so the CLI
+  # is rebuilt from a copy of the nixpkgs expression whose wrapper points at
+  # browsers-chromium instead. --replace-fail makes this die loudly if
+  # upstream restructures driver.nix, rather than silently handing back a CLI
+  # with no browsers.
+  playwrightDriverSrc = pkgs.runCommand "playwright-driver-src-chromium-only" { } ''
+    cp -r ${pkgs.path}/pkgs/development/web/playwright $out
+    chmod -R u+w $out
+    substituteInPlace $out/driver.nix \
+      --replace-fail \
+        'PLAYWRIGHT_BROWSERS_PATH "''${playwright-core.passthru.browsers}"' \
+        'PLAYWRIGHT_BROWSERS_PATH "''${playwright-core.passthru.browsers-chromium}"'
+  '';
+  playwright-test-chromium =
+    (pkgs.callPackage "${playwrightDriverSrc}/driver.nix" { }).playwright-test;
+
+  # Generation-stable path to the Nix-patched Chromium in that bundle. The
+  # Playwright MCP defaults to the "chrome" channel = /opt/google/chrome,
+  # which cannot exist on NixOS -- its config instead passes
+  # --executable-path /run/current-system/sw/bin/playwright-chromium, which
+  # this keeps pointing at the current bundle across nixpkgs bumps.
   playwright-chromium-bin = pkgs.runCommand "playwright-chromium-bin" { } ''
     mkdir -p $out/bin
-    chrome=$(echo ${pkgs.playwright-driver.browsers}/chromium-*/chrome-linux*/chrome)
+    chrome=$(echo ${pkgs.playwright-driver.browsers-chromium}/chromium-*/chrome-linux*/chrome)
     [ -x "$chrome" ] || { echo "no chromium in playwright browsers bundle" >&2; exit 1; }
     ln -s "$chrome" $out/bin/playwright-chromium
   '';
@@ -52,7 +91,7 @@ in
     file
     poetry-skip-py37-mockenv-tests
     gh
-    playwright-test
+    playwright-test-chromium
     playwright-chromium-bin
     shellcheck
     sentry-cli
