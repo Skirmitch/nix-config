@@ -45,6 +45,15 @@
       "/var/lib/tailscale"
       # gnome-remote-desktop's system daemon state (remote-login side).
       "/var/lib/gnome-remote-desktop"
+      # GNOME's Power panel (Performance / Balanced / Power Saver) is backed by
+      # power-profiles-daemon, which saves the chosen profile to
+      # /var/lib/power-profiles-daemon/state.ini and restores it at startup
+      # (load_configuration() in power-profiles-daemon.c, then a Profile= read
+      # gated on the CpuDriver/PlatformDriver still matching). On the wiped
+      # @root that file was recreated empty every boot, so the daemon fell back
+      # to `balanced` and "Performance" never survived a reboot. Same shape as
+      # the systemd timer stamps above.
+      "/var/lib/power-profiles-daemon"
       "/var/lib/docker"
       "/var/lib/postgresql"
     ];
