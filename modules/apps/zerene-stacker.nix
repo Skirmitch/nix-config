@@ -53,7 +53,9 @@ let
       makeWrapper
       copyDesktopItems
       imagemagick
-      perl # the only icons shipped are .gif, inside the jar
+      perl
+      python3
+      zip # the only icons shipped are .gif, inside the jar
     ];
 
     # ZereneStacker (the launcher) needs only libc; StackShotHelper.zslinux
@@ -92,9 +94,47 @@ let
       # Bundled exiftool is a Perl distribution with a /usr/bin/perl shebang.
       patchShebangs $appdir/exiftool
 
+      # ...but the shebang is not enough: after writing an output image Zerene
+      # copies EXIF/ICC across with exiftool, and EXIFPropagator builds the
+      # command as the literal pair ["/usr/bin/perl", appdir + "/exiftool/exiftool"]
+      # for both macOS and Linux, with no existence check and no fallback
+      # (verified by disassembly: two `ldc "/usr/bin/perl"` behind isMacOSX()/
+      # isLinux(), one shared constant-pool entry). On NixOS that path does not
+      # exist, so ProcessBuilder.start() throws, the exception is swallowed, and
+      # the save ends with "EXIFPropagator unable to execute external program"
+      # plus an NPE -- the image is written but with NO metadata propagated.
+      # There is no preference to override the path, so the single UTF8 constant
+      # is rewritten to nixpkgs' perl. Alternative, if this ever feels too
+      # invasive: a systemd.tmpfiles "L+ /usr/bin/perl" symlink instead, at the
+      # cost of a global FHS path. The assert makes a repackaged upstream fail
+      # the build loudly rather than silently losing metadata again.
+      ( cd $TMPDIR && rm -rf jarpatch && mkdir jarpatch && cd jarpatch
+        unzip -q $appdir/ZereneStacker.jar com/zerenesystems/stacker/engine/b/a.class
+        python3 -c '
+import sys
+cls, perl = sys.argv[1], sys.argv[2]
+d = open(cls, "rb").read()
+old = b"\x01\x00\x0d/usr/bin/perl"
+n = d.count(old)
+assert n == 1, "expected exactly 1 /usr/bin/perl constant in EXIFPropagator, found %d" % n
+b = perl.encode()
+open(cls, "wb").write(d.replace(old, b"\x01" + len(b).to_bytes(2, "big") + b))
+' com/zerenesystems/stacker/engine/b/a.class "${pkgs.perl}/bin/perl"
+        zip -q $appdir/ZereneStacker.jar com/zerenesystems/stacker/engine/b/a.class )
+
       # The launcher resolves its own directory, so it must be exec'd in place
       # rather than symlinked into bin.
-      makeWrapper $appdir/ZereneStacker $out/bin/zerene-stacker
+      #
+      # XDG_DATA_DIRS must carry GTK *3*'s gsettings schemas. "Files > Select
+      # Files" opens an AWT FileDialog, which on Linux is the native GTK 3
+      # chooser; gtk_file_chooser_widget_get_default_size() builds a GSettings
+      # for org.gtk.Settings.FileChooser, and a missing schema is a FATAL glib
+      # log -> abort(), i.e. the whole JVM dies with SIGABRT the moment the
+      # dialog opens (reproduced 2026-09-18, coredump stack ends in
+      # _g_log_abort). A GNOME session exports gtk4's schemas but not gtk3's,
+      # so nothing else on the box supplies it.
+      makeWrapper $appdir/ZereneStacker $out/bin/zerene-stacker \
+        --prefix XDG_DATA_DIRS : "${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}"
 
       # Desktop entry + icons. The only artwork upstream ships is three .gif
       # files inside the jar, so convert them to the PNG the icon spec wants.
