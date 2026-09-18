@@ -30,6 +30,7 @@
     ../../modules/apps/remote-desktop.nix
     ../../modules/apps/immersed.nix
     ../../modules/apps/on1-photoraw.nix
+    ../../modules/apps/zerene-stacker.nix
     ../../modules/apps/g9cam.nix
     ../../modules/apps/health-store.nix
   ];
