@@ -198,9 +198,29 @@ let
     fi
 
     runner=$(ls -d "$HOME/.local/share/lutris/runners/wine"/GE-Proton* 2>/dev/null | sort -V | tail -1 || true)
-    if [ -z "$runner" ] || [ ! -x "$runner/files/bin/wine" ]; then
+    if [ -z "$runner" ]; then
       echo "No GE-Proton runner under ~/.local/share/lutris/runners/wine." >&2
       echo "Run protonup-qt and add one (target: Lutris)." >&2
+      exit 1
+    fi
+
+    # Pick a wine that can actually RUN, not just one that exists. GE-Proton
+    # ships files/bin/wine as a 32-bit i386 binary whose ELF interpreter is
+    # /lib/ld-linux.so.2; NixOS' nix-ld only provides the 64-bit
+    # /lib64/ld-linux-x86-64.so.2, so exec'ing it fails with a bare
+    # "No such file or directory" that names the wrapper, not the missing
+    # loader. wine64 is the 64-bit sibling and is what a win64 app like ON1
+    # needs anyway. `--version` is the liveness test: it fails for a missing
+    # interpreter exactly as it would for a missing file.
+    wine=""
+    for cand in "$runner/files/bin/wine64" "$runner/files/bin/wine"; do
+      if [ -x "$cand" ] && "$cand" --version >/dev/null 2>&1; then
+        wine="$cand"; break
+      fi
+    done
+    if [ -z "$wine" ]; then
+      echo "Found runner $runner but neither wine64 nor wine is runnable there." >&2
+      echo "(A 32-bit-only wine cannot start on this host: no /lib/ld-linux.so.2.)" >&2
       exit 1
     fi
 
@@ -226,11 +246,11 @@ let
       echo "NOTE: no AppData/Roaming/ON1 yet; nothing to back up."
     fi
 
-    echo "Runner : $runner"
+    echo "Runner : $wine ($("$wine" --version 2>/dev/null))"
     echo "Prefix : $prefix"
     echo "Installing ${ed.installerName} (build ${ed.build}) into the EXISTING prefix."
     echo "Keep the default install directory so it upgrades in place."
-    exec env WINEPREFIX="$prefix" "$runner/files/bin/wine" ${on1Installer}
+    exec env WINEPREFIX="$prefix" "$wine" ${on1Installer}
   '';
 
   desktopItem = pkgs.makeDesktopItem {
