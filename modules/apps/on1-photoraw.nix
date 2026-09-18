@@ -43,15 +43,25 @@ let
   # Flip to "max" if the license is Photo RAW MAX (same build, own installer).
   edition = "standalone";
 
+  # Each edition carries its OWN build: they are released together but were
+  # pinned at different times here, and a single shared `build` silently
+  # invalidated the other edition's hash whenever one was bumped.
   editions = {
     standalone = rec {
       installerName = "ON1_Photo_RAW_2026.exe";
-      hash = "sha256-1WdkXL19uZnSqIRp/qAHIHBSopoCTchVFDGDvembi64=";
+      # 2026.5.1 (20.5.1.19148), released 2026-08-31.
+      build = "19148";
+      hash = "sha256-FWyDBI9MDnhpbxJR/sT/1TqETOs62Gj+01LPY7uZmvY=";
       windowsDir = "ON1 Photo RAW 2026";
       exeName = "${windowsDir}.exe";
     };
     max = rec {
       installerName = "ON1_Photo_RAW_MAX_2026.exe";
+      # Last hash verified here; MAX is also at 19148 upstream but that build
+      # was never downloaded, so this stays on the one whose hash is known.
+      # gm_18862 still serves (checked 2026-09-18). To move MAX to 19148, bump
+      # this build and take the new hash from the build error.
+      build = "18862";
       hash = "sha256-sIbkMlTKSd15xAwpyktVfikB4c2RWENBQ+eDR/FijoY=";
       # Unconfirmed default install dir for MAX — the wizard shows it; if it
       # differs, fix the exe path afterwards in Lutris (game → Configure).
@@ -61,11 +71,11 @@ let
   };
   ed = editions.${edition};
 
-  build = "18862";
   slug = "on1-photo-raw-2026";
+  prefixDir = "Games/${slug}";
 
   on1Installer = pkgs.fetchurl {
-    url = "https://ononesoft.cachefly.net/photoraw2026/win/gm_${build}/${ed.installerName}";
+    url = "https://ononesoft.cachefly.net/photoraw2026/win/gm_${ed.build}/${ed.installerName}";
     inherit (ed) hash;
   };
 
@@ -166,6 +176,63 @@ let
     exec lutris -i "$stage/on1-photo-raw.yml"
   '';
 
+  # UPDATING an existing install. on1-install must NOT be used for this: it
+  # hands Lutris a fresh install script, which builds a NEW prefix and would
+  # leave the signed-in account, licence state and preferences behind in the
+  # old one (they live in
+  # <prefix>/drive_c/users/steamuser/AppData/Roaming/ON1, not in the store).
+  # This runs the pinned installer INSIDE the existing prefix with the same
+  # GE-Proton runner Lutris uses, so ON1 upgrades in place: account, settings
+  # and the Lutris game entry all survive, and the exe path is unchanged
+  # ("ON1 Photo RAW 2026.exe" across 2026.x), so the desktop entry keeps
+  # working. AppData/Roaming/ON1 is tarred up first as cheap insurance.
+  on1Update = pkgs.writeShellScriptBin "on1-update" ''
+    set -euo pipefail
+    prefix="$HOME/${prefixDir}"
+    appdata="$prefix/drive_c/users/steamuser/AppData/Roaming/ON1"
+
+    if [ ! -d "$prefix/drive_c" ]; then
+      echo "No existing prefix at $prefix." >&2
+      echo "This command only UPDATES an install; use on1-install for a first one." >&2
+      exit 1
+    fi
+
+    runner=$(ls -d "$HOME/.local/share/lutris/runners/wine"/GE-Proton* 2>/dev/null | sort -V | tail -1 || true)
+    if [ -z "$runner" ] || [ ! -x "$runner/files/bin/wine" ]; then
+      echo "No GE-Proton runner under ~/.local/share/lutris/runners/wine." >&2
+      echo "Run protonup-qt and add one (target: Lutris)." >&2
+      exit 1
+    fi
+
+    # Insurance only: an in-place upgrade does not touch AppData. The
+    # regenerable bulk is skipped deliberately -- AppData/Roaming/ON1 is ~6.4 GB
+    # here and almost all of it is re-downloadable or rebuildable
+    # (PhotoSettingsCache 4.2G, Models 1.5G, NDService 641M, the browse caches).
+    # What is kept is the small irreplaceable part: licence/account state,
+    # preferences, plists and the component/lens databases.
+    if [ -d "$appdata" ]; then
+      stamp=$(date +%Y-%m-%d-%H%M%S)
+      backup="''${XDG_CACHE_HOME:-$HOME/.cache}/on1-update/ON1-settings-$stamp.tar.gz"
+      mkdir -p "$(dirname "$backup")"
+      tar -C "$(dirname "$appdata")" \
+        --exclude=ON1/PerfectBrowseCache \
+        --exclude='ON1/*/PhotoSettingsCache' \
+        --exclude='ON1/*/Models' \
+        --exclude='ON1/*/NDService' \
+        --exclude='ON1/*/ExploreService' \
+        -czf "$backup" ON1
+      echo "Backed up account/settings -> $backup ($(du -h "$backup" | cut -f1))"
+    else
+      echo "NOTE: no AppData/Roaming/ON1 yet; nothing to back up."
+    fi
+
+    echo "Runner : $runner"
+    echo "Prefix : $prefix"
+    echo "Installing ${ed.installerName} (build ${ed.build}) into the EXISTING prefix."
+    echo "Keep the default install directory so it upgrades in place."
+    exec env WINEPREFIX="$prefix" "$runner/files/bin/wine" ${on1Installer}
+  '';
+
   desktopItem = pkgs.makeDesktopItem {
     name = "on1-photo-raw";
     desktopName = "ON1 Photo RAW 2026";
@@ -180,6 +247,7 @@ in {
     pkgs.protonup-qt # one-time: fetches the GE-Proton runner into Lutris
     pkgs.unzip # the install script's WinMetadata extract step runs host unzip
     on1Install
+    on1Update
     desktopItem
   ];
 }
