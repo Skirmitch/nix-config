@@ -50,12 +50,34 @@ let
     Endpoint = SERVER_IP:51820
     PersistentKeepalive = 25
   '';
+  # wgnord 0.2.2 no longer renders from /var/lib/wgnord/template.conf: nixpkgs
+  # patches the path to the store copy at build time
+  # (pkgs/by-name/wg/wgnord/package.nix, `--replace-fail '$conf_dir/template.conf'
+  # "$out/share/template.conf"`), so the tmpfiles pin below went inert and took
+  # every hook above with it. Diagnosed 2026-09-24 after the 09-22 nixpkgs bump
+  # carried 0.2.1 -> 0.2.2: tunnel healthy, DNS dead, nsncd's 8 workers blocking
+  # on lookups the tunnel swallowed and the daemon exiting about once a minute.
+  # The give-away needs no reconnect: the template is 827 bytes, upstream's is
+  # 215, and the rendered /etc/wireguard/wgnord.conf was 287 = 215 + the keys.
+  # The path is baked in during the UNRESHOLVED build, so overriding postPatch
+  # on the resolved derivation does nothing (verified: the built script still
+  # pointed at the 215-byte upstream copy). Rewrite it in the finished script
+  # instead. --replace-fail is the trip wire: if nixpkgs ever stops pointing at
+  # $unresholved/share/template.conf, this fails the build rather than silently
+  # handing the tunnel a hookless config again.
+  wgnord = pkgs.wgnord.overrideAttrs (old: {
+    postFixup = (old.postFixup or "") + ''
+      substituteInPlace $out/bin/wgnord \
+        --replace-fail "${pkgs.wgnord.unresholved}/share/template.conf" "${template}"
+    '';
+  });
 in
 {
-  environment.systemPackages = [ pkgs.wgnord ];
+  environment.systemPackages = [ wgnord ];
 
   systemd.tmpfiles.rules = [
-    # Pin the template (L+ replaces whatever wgnord left there).
+    # Kept for the day upstream honours $conf_dir again: harmless while inert,
+    # and it is what wgnord's own --help still tells you to edit.
     "L+ /var/lib/wgnord/template.conf - - - - ${template}"
     # Private keys must not be world-readable. wgnord truncates-in-place on
     # each connect, so the mode set here survives reconnects.
