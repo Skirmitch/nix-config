@@ -65,9 +65,12 @@
       in builtins.substring 0 50 clean;
 
       mkHost = hostName: nixpkgs.lib.nixosSystem {
-        system = "x86_64-linux";
+        # Not `system = ...`: that feeds the deprecated nixpkgs.system. Setting
+        # the platform as a module is the current idiom and evaluates to a
+        # byte-identical toplevel.
         specialArgs = { inherit inputs nixosLabel; };
         modules = [
+          { nixpkgs.hostPlatform = "x86_64-linux"; }
           ./hosts/${hostName}
           impermanence.nixosModules.impermanence
           home-manager.nixosModules.home-manager

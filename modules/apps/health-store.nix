@@ -1,6 +1,6 @@
 { pkgs, inputs, lib, ... }:
 let
-  hc = inputs.hc-sync.packages.${pkgs.system};
+  hc = inputs.hc-sync.packages.${pkgs.stdenv.hostPlatform.system};
   stateDir = "/var/lib/health";
 
   # The ONE place the public name lives. It is this node's MagicDNS name
