@@ -1,4 +1,12 @@
-{ config, pkgs, ... }: {
+{ config, lib, pkgs, ... }:
+let
+  seats = config.cycle.seats or { };
+  roles = lib.mapAttrsToList (_: s: s.dbRole) seats;
+  # The exemption pattern is GENERATED. Shipped by hand as `(_operator|_builder)` it
+  # would have silently dropped a third seat's test databases at 04:30 - both seats
+  # independently warned about exactly this, and Constructor and Seba folders exist.
+  suffixAlt = lib.concatStringsSep "|" (map (r: lib.removePrefix "lonchera" r) roles);
+in {
   # --- POSTGRESQL (system-wide dev database) ---
   services.postgresql = {
     enable = true;
@@ -43,10 +51,8 @@
       # its own BASE database failed with "permission denied for schema public".
       # The test workflow works either way; ownership just stops the base
       # database being a dead end the first time someone tries to use it.
-      { name = "lonchera_operator"; ensureClauses.createdb = true; ensureDBOwnership = true; }
-      { name = "lonchera_builder";  ensureClauses.createdb = true; ensureDBOwnership = true; }
-    ];
-    ensureDatabases = [ "skirmitch" "lonchera_operator" "lonchera_builder" ];
+    ] ++ map (r: { name = r; ensureClauses.createdb = true; ensureDBOwnership = true; }) roles;
+    ensureDatabases = [ "skirmitch" ] ++ roles;
   };
 
   # Client tools (psql, pg_dump, …) on PATH for everyone.
@@ -86,7 +92,7 @@
     script = ''
       psql -At -d postgres -c "select datname from pg_database
           where datname like 'test\_%'
-            and datname !~ '^test_lonchera(_operator|_builder)?(_gw[0-9]+)?$'
+            and datname !~ '^test_lonchera(${suffixAlt})?(_gw[0-9]+)?$'
             and datname not in (
               select datname from pg_stat_activity where datname is not null)" |
       while read -r db; do

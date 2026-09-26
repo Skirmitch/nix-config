@@ -16,10 +16,12 @@
     ../../modules/system/input.nix
     ../../modules/system/users.nix
     ../../modules/system/swap.nix
+    ../../modules/system/bulk-storage.nix
     ../../modules/gaming
     ../../modules/apps/claude.nix
     ../../modules/apps/docker.nix
     ../../modules/apps/postgresql.nix
+    ../../modules/apps/cycle-seats.nix
     ../../modules/apps/redis.nix
     ../../modules/apps/programming.nix
     ../../modules/apps/printing3d.nix
@@ -34,6 +36,35 @@
     ../../modules/apps/g9cam.nix
     ../../modules/apps/health-store.nix
   ];
+
+  # --- CYCLE-HQ SEATS ---
+  # One table. Postgres roles, the drop-timer exemption, redis instances, slices, the
+  # `seat` launcher, the SessionStart hook, the sweep and /etc/cycle/seats.json all derive
+  # from here, so adding a seat is one attribute rather than six edits that can disagree.
+  #
+  # Numbers are the seats' own, measured, and both argued their figure DOWN:
+  #   operator 32G  - "a legitimate sandbox is the tracked tree (0.30 GiB) plus outputs,
+  #                    under 1 GB; 16 agents is ~16 GB; 32 GB is 2x. The 12 GB per clone
+  #                    came from running the full parity+redtest inside every mutant's
+  #                    clone - a design defect of that lens, not a need."
+  #   builder  20G  - nothing of its copies a tree into temp; worktrees stay on /home.
+  # At 8 GB/min a 32 GB wall arrives in ~4 minutes.
+  cycle.seats = {
+    operator = {
+      folder = "cycle-hq/Operator";
+      dbRole = "lonchera_operator";
+      redisPort = 6380;
+      scratchQuota = "32G"; scratchAlarm = "16G";
+      memoryMax = "32G"; memorySwapMax = "8G";
+    };
+    builder = {
+      folder = "cycle-hq/Builder";
+      dbRole = "lonchera_builder";
+      redisPort = 6381;
+      scratchQuota = "20G"; scratchAlarm = "10G";
+      memoryMax = "24G"; memorySwapMax = "8G";
+    };
+  };
 
   networking.hostName = "Diana";
 

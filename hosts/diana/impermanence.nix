@@ -151,7 +151,10 @@
         ".config/vivaldi"
         ".config/discord"
         ".config/Claude"
-        ".local/share/anime-game-launcher"
+        # ".local/share/anime-game-launcher" MOVED 2026-09-26 to /mnt/bulk on the
+        # second NVMe (148 G, 145 of it Genshin). See modules/system/bulk-storage.nix.
+        # It must NOT be listed here: impermanence would bind /persist over the new
+        # mount, you would still see the old data, and no space would be freed.
         ".local/share/dconf"
         ".config/dconf"
         ".local/share/gnome-shell"
@@ -185,7 +188,8 @@
         ".android"
         ".config/SideQuest"
         ".steam"
-        ".local/share/Steam"
+        # ".local/share/Steam" MOVED 2026-09-26 to /mnt/bulk (212 G). Same reason as
+        # anime-game-launcher above. ".steam" stays: it is 44 K of symlinks/config.
         ".claude"
         ".config/gh"
         ".config/opencode"
