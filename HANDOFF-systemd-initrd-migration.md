@@ -14,6 +14,32 @@ This file is self-contained. Companion notes:
 
 ---
 
+
+## ⛔ PREREQUISITE (added 2026-09-25): there must be at least 2 parked roots
+
+The 2026-09-25 disk reclamation ran `~/cleanup-old-roots.sh --apply`. That script has **no retention** —
+line 55 loops over `old_roots/@root_*` unconditionally — so it deleted **all 57** parked roots.
+**Diana currently has ZERO.**
+
+Those roots are the forensic record for this exact migration. Both May 2026 failures were diagnosed by
+inspecting what the wipe had done to the parked roots; without them a third failure is unexplainable.
+
+`hosts/diana/impermanence.nix` now carries a retention loop that keeps the **2 newest** roots, so the
+net rebuilds on its own: one root after the next normal reboot, two after the one following.
+
+**Gate before Phase 1:**
+
+```
+sudo btrfs subvolume list / | grep -oP 'old_roots/@root_[0-9_-]+$' | sort -u | wc -l   # must be >= 2   (count DISTINCT roots: a plain `grep -c 'old_roots/@root_'`
+#                 counts THREE lines per parked root, because each carries
+#                 nested srv and var/tmp subvolumes, so it reads 3 after a
+#                 single reboot and passes this gate with ONE rollback root.)
+```
+
+Note the retention lives in the *initrd* script. It does not apply to the manual cleanup script, and if
+the migration replaces `boot.initrd.postDeviceCommands` with a systemd unit, **the retention loop must be
+carried into that unit** (together with `RemainAfterExit = true`) or the old_roots leak returns.
+
 ## TL;DR
 
 The impermanence "erase your darlings" wipe lives in `boot.initrd.postDeviceCommands`, a scripted-initrd-only
