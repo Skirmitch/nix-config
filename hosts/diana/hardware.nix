@@ -53,25 +53,34 @@
 
 #  ---  DATA DRIVES AND MOUNTING POINTS
 
-  fileSystems."/mnt/windows" = {
+  fileSystems."/mnt/win-live" = {
     device = "/dev/disk/by-uuid/B4A894D9A8949B84";
     fsType = "ntfs";
     options = [ "rw" "uid=1000" "gid=100" "dmask=022" "fmask=133" "nofail" ];
   };
 
-  fileSystems."/mnt/hp-ssd" = {
-    device = "/dev/disk/by-uuid/C64A6A6B4A6A57E7";
-    fsType = "ntfs3";
-    options = [ "rw" "uid=1000" "gid=100" "dmask=022" "fmask=133" "nofail" ];
-  };
+  # Mount points renamed 2026-09-26 to something legible while triaging the
+  # estate: win-live is the Windows install still in use, hdd-data is the
+  # Seagate holding the Gentoo disk image, hdd-harvest is the Seagate holding
+  # ESTATE-HARVEST-2026-09-26. The old names (/mnt/windows, /mnt/data, /mnt/sda)
+  # said which device, not which contents, which is the wrong axis when you are
+  # deciding what to delete.
+  #
+  # /mnt/hp-ssd removed 2026-09-25. That NTFS partition lived on the HP EX920
+  # (nvme1n1), which is being wiped and repartitioned: the laptop it came from
+  # cooked it when the fan died, giving 29,611 media errors from NAND charge
+  # decay — with the spare pool untouched at 100% and only 8% endurance used,
+  # so the cells are fine and a full erase resets them. The old UUID
+  # C64A6A6B4A6A57E7 will not exist afterwards. A new entry goes here once the
+  # drive is reformatted and proven.
 
-  fileSystems."/mnt/data" = {
+  fileSystems."/mnt/hdd-data" = {
     device = "/dev/disk/by-uuid/ACF89E50F89E18A2";
     fsType = "ntfs3";
     options = [ "rw" "uid=1000" "gid=100" "dmask=022" "fmask=133" "nofail" ];
   };
 
-  fileSystems."/mnt/sda" = {
+  fileSystems."/mnt/hdd-harvest" = {
     device = "/dev/disk/by-uuid/903A9B663A9B485C";
     fsType = "ntfs3";
     options = [ "rw" "uid=1000" "gid=100" "dmask=022" "fmask=133" "nofail" ];
