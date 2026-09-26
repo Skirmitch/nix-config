@@ -11,12 +11,91 @@
     fi
 
     delete_subvolumes() {
+        # GUARD 1 of 2 - the target MUST be inside old_roots/@root_*.
+        #
+        # Two separate escapes make this necessary, both verified against the
+        # real initrd busybox in a VM:
+        #
+        #  (a) WORD SPLITTING. The retention loop below used an unquoted
+        #      $(...), so a parked entry named `@root_x mnt` split into two
+        #      words and handed the bare word `mnt` to this function. Stage 1
+        #      runs with cwd=/, so `mnt` resolves to the btrfs TOP LEVEL, which
+        #      is itself a subvolume root (inode 256) and sailed past guard 2.
+        #      `btrfs subvolume list -o mnt` then returned every top-level
+        #      subvolume and the recursion deleted @home, @persist, @nix, @log
+        #      and @root-blank. A single SPACE in a name was the whole exploit.
+        #
+        #  (b) EMBEDDED NEWLINES. `btrfs subvolume list` prints names raw
+        #      (btrfs-progs 7.1 cmds/subvolume-list.c:1198, no escaping), and
+        #      IFS is a newline here, so a nested subvolume named
+        #      "x<newline>@nix" yielded a second word `@nix` -> /mnt/@nix.
+        #      Creating a subvolume is UNPRIVILEGED, and /tmp and /var/tmp are
+        #      1777, so any local process could plant a delayed root-level
+        #      delete that fires two boots later.
+        #
+        # This prefix test rejects every such fragment: `mnt`, `@nix`,
+        # `/mnt/@home` - none of them start with /mnt/old_roots/@root_.
+        case "$1" in
+            /mnt/old_roots/@root_*) ;;
+            *) return 0 ;;
+        esac
+
+        # GUARD 2 of 2 - the target must be a real subvolume ROOT.
+        #
+        # `btrfs subvolume list -o <path>` does NOT fail on a non-subvolume: it
+        # falls back to the tree CONTAINING that path (lookup_path_rootid), and
+        # for anything under old_roots/ that tree is the btrfs TOP LEVEL, id 5.
+        # The -o filter would then list @home, @persist, @nix, @log and
+        # @root-blank as "children", and this recursion would delete every one
+        # of them, leaving /home and /persist destroyed and the machine
+        # unbootable. Nothing is mounted here, so every delete would succeed.
+        #
+        # A plain directory named @root_* in old_roots is enough to trigger it -
+        # e.g. a `mkdir`, `cp -a` or `cp --reflink` rescue done by hand at the
+        # top level, which is exactly the kind of thing the two retained roots
+        # exist to invite during the systemd-initrd migration.
+        #
+        # Subvolume roots ALWAYS have inode 256; plain directories never do
+        # (verified on this box: / /home /persist /nix = 256, /etc = 271).
+        # busybox stat does not dereference, so a symlink is skipped too.
+        [ "$(stat -c %i "$1" 2>/dev/null)" = 256 ] || return 0
         IFS=$'\n'
         for i in $(btrfs subvolume list -o "$1" | cut -f 9- -d ' '); do
             delete_subvolumes "/mnt/$i"
         done
         btrfs subvolume delete "$1"
     }
+
+    # RETENTION - keep only the 2 most recent parked roots.
+    #
+    # Without this the move-aside above never deleted anything: 57 roots had
+    # accumulated by 2026-09-25 (~175 GiB, the single largest non-game item on
+    # the disk). delete_subvolumes() was defined here from the start and simply
+    # never called. Worse, /tmp lives on @root rather than tmpfs, so every
+    # boot's /tmp is frozen forever too - one agent-workflow day parked 34 GiB
+    # of `git clone --shared` trees under /tmp/closure-w1-*.
+    #
+    # TWO are kept deliberately, not for safety margin but as the rollback
+    # evidence for the pending systemd-initrd migration: if the new unit wipes
+    # or parks the wrong subvolume again (it did twice in May 2026), the
+    # previous boots' roots are what we inspect to work out what happened.
+    #
+    # Placement matters: this MUST sit after delete_subvolumes() is defined.
+    # busybox ash resolves a function only once its definition has been
+    # executed, so calling it earlier fails with "not found" - and because the
+    # wipe script runs without `set -e`, that failure is silent and the leak
+    # quietly continues.
+    #
+    # Names sort chronologically (@root_YYYY-MM-DD_HH-MM-SS), so reverse-sort
+    # and drop the first two. `tail -n +3` is busybox-safe; `head -n -2` is not.
+    # `while IFS= read -r` instead of `for i in $(...)`: the unquoted command
+    # substitution split names on spaces and tabs AND glob-expanded them, which
+    # is escape (a) described above. read -r with an empty IFS takes each line
+    # whole and does no globbing.
+    ls -1d /mnt/old_roots/@root_* 2>/dev/null | sort -r | tail -n +3 |
+    while IFS= read -r parked; do
+        delete_subvolumes "$parked"
+    done
 
     btrfs subvolume snapshot /mnt/@root-blank /mnt/@root
     umount /mnt
