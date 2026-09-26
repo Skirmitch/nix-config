@@ -107,4 +107,31 @@ in
     # JS frontend
     bun            # runtime + package manager + bundler
   ];
+
+  # --- PLAYWRIGHT BROWSERS FOR THE CYCLE SEATS ---
+  #
+  # Operator asked for `playwright-driver.browsers` so the seats can run
+  # end-to-end tests of the admin planogram editor. That package is the one
+  # thing this module exists to avoid: it builds chromium + firefox + webkit,
+  # and playwright-webkit's auto-patchelf failure on libmanette (2026-09-18)
+  # propagated into system-path and toplevel, which broke rebuilds outright.
+  #
+  # `browsers-chromium` gives the seats what they actually need with none of
+  # that risk, and it is the same bundle the CLI and MCP already drive. If
+  # cross-browser coverage is ever genuinely required, build-test
+  # playwright-driver.browsers on its own FIRST - it evaluates on this pin,
+  # which is not the same as building.
+  #
+  # Pin @playwright/test to ${pkgs.playwright-driver.version} in any repo that
+  # uses this, or the JS client and the browser bundle drift apart.
+  environment.sessionVariables = {
+    PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.selectBrowsers {
+      withFirefox = false;
+      withWebkit = false;
+      withChromiumHeadlessShell = true;
+    }}";
+    # nixpkgs' chromium is already patched for NixOS; playwright's own host
+    # validation looks for distro packages that do not exist here.
+    PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
+  };
 }
