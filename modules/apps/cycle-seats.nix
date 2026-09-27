@@ -174,7 +174,7 @@ let
 
       # the cwd must be the folder the table maps this seat to
       want=$(jq -r --arg n "$seat" '.seats[$n].folder' "$J")
-      case "$PWD" in "$HOME/$want"*) ;; *)
+      case "$PWD" in "$HOME/$want"|"$HOME/$want"/*) ;; *)
         say "FAIL CYCLE_SEAT=$seat but cwd is $PWD, expected \$HOME/$want"; bad=1 ;;
       esac
 
@@ -201,8 +201,36 @@ let
       # boot_id means dead, full stop. pid comes from CLAUDE_PID because this hook's own
       # parent may be a shell. Rewritten on EVERY start including resume, because the
       # scratchpad directory outlives the process under --continue.
-      sid="''${CLAUDE_CODE_SESSION_ID:-}"
-      cpid="''${CLAUDE_PID:-$PPID}"
+      # THE SESSION ID ARRIVES ON STDIN, NOT IN THE ENVIRONMENT.
+      #
+      # Builder proved this by dogfooding: it relaunched via `seat`, and afterwards NONE
+      # of the session dirs under its scratch root held a .cycle-owner - while the script
+      # still cheerfully printed "ok". Running it by hand with CLAUDE_CODE_SESSION_ID and
+      # CLAUDE_PID stripped reproduced it exactly. Hooks are fed a JSON object on stdin
+      # (session_id, cwd, hook_event_name, source); the env vars a Bash TOOL sees are not
+      # the env a HOOK sees.
+      sid=$(jq -r '.session_id // empty' 2>/dev/null <&0 || true)
+      [ -n "$sid" ] || sid="''${CLAUDE_CODE_SESSION_ID:-}"
+
+      # AND NEVER FALL BACK TO $PPID. This was a data-loss bug, not a cosmetic one.
+      # If the harness runs the hook through a short-lived shell, $PPID dies immediately,
+      # the owner file records a dead pid, and the reaper then deletes a LIVE session's
+      # scratchpad. Walk up for the actual claude process instead, and if there is no
+      # claude ancestor, write NOTHING and fail loudly - a missing owner file is handled
+      # safely by the reaper's age fallback; a wrong one is not.
+      cpid=""
+      if [ -n "''${CLAUDE_PID:-}" ] && [ -d "/proc/''${CLAUDE_PID}" ]; then
+        cpid="$CLAUDE_PID"
+      else
+        _p=$PPID; _n=0
+        while [ "''${_p:-1}" -gt 1 ] && [ "$_n" -lt 12 ]; do
+          case "$(cat "/proc/$_p/comm" 2>/dev/null)" in
+            .claude-unwrapp|claude) cpid="$_p"; break ;;
+          esac
+          _p=$(awk '{print $4}' "/proc/$_p/stat" 2>/dev/null)
+          _n=$((_n+1))
+        done
+      fi
       # Derive the path from the REAL temp base, not from the table.
       #
       # Using the table's value stamped an owner file into the bulk disk even when the
@@ -211,15 +239,24 @@ let
       # as CLAUDE_CODE_TMPDIR || os.tmpdir() (which reads TMPDIR), so mirror that exactly
       # and the owner file always lands beside the scratchpad it describes.
       base="''${CLAUDE_CODE_TMPDIR:-''${TMPDIR:-/tmp}}"
-      if [ -n "$sid" ]; then
+      # The "ok" line must not claim a check it never made. Before this, it printed ok
+      # whether or not the owner file was written, which is precisely how the missing
+      # owner files went unnoticed.
+      if [ -z "$sid" ]; then
+        say "FAIL no session id (not on stdin, not in env) - no owner file written"; bad=1
+      elif [ -z "$cpid" ]; then
+        say "FAIL no claude ancestor found - refusing to write an owner file with a wrong pid"; bad=1
+      else
         slug=$(echo "$PWD" | tr '/' '-')
         d="$base/claude-$(id -u)/$slug/$sid"
-        mkdir -p "$d" 2>/dev/null && {
-          st=$(awk '{print $22}' "/proc/$cpid/stat" 2>/dev/null || echo 0)
-          printf '{"boot_id":"%s","pid":%s,"starttime":%s,"seat":"%s"}\n' \
-            "$(cat /proc/sys/kernel/random/boot_id)" "$cpid" "''${st:-0}" "$seat" \
-            > "$d/.cycle-owner"
-        }
+        st=$(awk '{print $22}' "/proc/$cpid/stat" 2>/dev/null || echo "")
+        if [ -n "$st" ] && mkdir -p "$d" 2>/dev/null && \
+           printf '{"boot_id":"%s","pid":%s,"starttime":%s,"seat":"%s"}\n' \
+             "$(cat /proc/sys/kernel/random/boot_id)" "$cpid" "$st" "$seat" > "$d/.cycle-owner"; then
+          :
+        else
+          say "FAIL could not write the owner file at $d - the sweep cannot see this session"; bad=1
+        fi
       fi
 
       if [ "$bad" = 0 ]; then
