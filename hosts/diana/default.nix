@@ -42,27 +42,43 @@
   # `seat` launcher, the SessionStart hook, the sweep and /etc/cycle/seats.json all derive
   # from here, so adding a seat is one attribute rather than six edits that can disagree.
   #
-  # Numbers are the seats' own, measured, and both argued their figure DOWN:
-  #   operator 32G  - "a legitimate sandbox is the tracked tree (0.30 GiB) plus outputs,
-  #                    under 1 GB; 16 agents is ~16 GB; 32 GB is 2x. The 12 GB per clone
-  #                    came from running the full parity+redtest inside every mutant's
-  #                    clone - a design defect of that lens, not a need."
-  #   builder  20G  - nothing of its copies a tree into temp; worktrees stay on /home.
-  # At 8 GB/min a 32 GB wall arrives in ~4 minutes.
+  # MEMORY NUMBERS ARE NOW MEASURED, not argued. Both seats sampled memory.stat anon at
+  # 1 s through their heaviest routine job on 2026-09-27:
+  #
+  #   operator  full suite, 141 checks, 653 s:  anon idle 469 MiB, PEAK 731 MiB, END 404 MiB
+  #                                             - it finished 65 MiB BELOW where it started.
+  #                                             Largest single process 278 MiB. PSI 0.00.
+  #   builder   backend suite, 2506 tests -n 8: anon PEAK 2.88 G, released to 1.78 G.
+  #   cycle.slice with BOTH seats working:      anon 2.5 GiB, 220 tasks.
+  #
+  # So 22G per seat is 7x Builder's measured peak and 30x Operator's. These are not
+  # governors. Per JL, 2026-09-27: if the seats can use more RAM to go faster, the answer
+  # is to buy RAM, not to cap them - a seat hitting a ceiling through LEGITIMATE fan-out is
+  # a signal that the machine is undersized, and he wants to hear it.
+  #
+  # 22G each is chosen so 22+22=44 sits strictly under the 48G parent. That is Builder's
+  # invariant: if the seats can sum past the parent, the PARENT's OOM fires first, and a
+  # memcg OOM picks the worst task in the whole subtree - so one seat's runaway kills the
+  # other seat's orchestrator. Containment costs nothing here because the real peaks are
+  # under 3 GiB.
+  #
+  # THE SEATS OWN THESE FROM HERE. A drop-in at
+  # ~/.config/systemd/user/cycle-<seat>.slice.d/override.conf beats this file without a
+  # rebuild; `cycle-limits` prints what is in force and fails if the invariant breaks.
   cycle.seats = {
     operator = {
       folder = "cycle-hq/Operator";
       dbRole = "lonchera_operator";
       redisPort = 6380;
       scratchQuota = "32G"; scratchAlarm = "16G";
-      memoryMax = "32G"; memorySwapMax = "8G";
+      memoryMax = "22G"; memorySwapMax = "4G"; tasksMax = 8192;
     };
     builder = {
       folder = "cycle-hq/Builder";
       dbRole = "lonchera_builder";
       redisPort = 6381;
       scratchQuota = "20G"; scratchAlarm = "10G";
-      memoryMax = "24G"; memorySwapMax = "8G";
+      memoryMax = "22G"; memorySwapMax = "4G"; tasksMax = 8192;
     };
   };
 
