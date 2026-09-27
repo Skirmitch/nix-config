@@ -341,7 +341,20 @@ relaunched with: seat $seat"
             # No owner file is exactly what a PLAIN launch produces, and a plain-launched
             # session may be alive right now. Builder's amendment: the fallback window
             # must be long. An hour would reap live seats that started the old way.
-            if [ -n "$(find "$d" -newermt '-2 days' -print -quit 2>/dev/null)" ]; then
+            # ABSOLUTE timestamp, deliberately, not `-newermt '-2 days'`.
+            #
+            # Relative timestamps are a GNU-find extension. bfs - which is what `find`
+            # resolves to in an interactive shell on this box - REJECTS them outright
+            # ("Invalid timestamp, supported formats are ISO 8601-like"). Under bfs the
+            # test returns empty, which falls straight through to the DELETE branch: the
+            # reaper would remove every live scratchpad that has no owner file. It is
+            # correct today only because writeShellApplication puts GNU findutils on this
+            # script's own PATH, which is one refactor away from not being true.
+            cutoff=$(date -d '2 days ago' '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)
+            if [ -z "$cutoff" ]; then
+              echo "REFUSING to sweep: cannot compute the cutoff date"; exit 1
+            fi
+            if [ -n "$(find "$d" -newermt "$cutoff" -print -quit 2>/dev/null)" ]; then
               : # touched recently, leave it
             else
               echo "unowned and cold >2d: $d"
