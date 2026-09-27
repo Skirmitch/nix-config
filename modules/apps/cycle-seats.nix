@@ -122,7 +122,9 @@ let
   # SessionStart hook: reports a broken launch, and stamps the owner file the sweep needs.
   sessionHook = pkgs.writeShellApplication {
     name = "cycle-session-start";
-    runtimeInputs = [ pkgs.coreutils pkgs.jq pkgs.systemd pkgs.gnugrep ];
+    # btrfs-progs and util-linux let the hook VERIFY the quota instead of asserting it
+    # (C7-H1 below). Both of those reads are unprivileged.
+    runtimeInputs = [ pkgs.coreutils pkgs.jq pkgs.systemd pkgs.gnugrep pkgs.btrfs-progs pkgs.util-linux ];
     text = ''
       set -uo pipefail
       J=/etc/cycle/seats.json
@@ -185,6 +187,54 @@ let
       case "''${TMPDIR:-}" in "$scratch"*) ;; *)
         say "FAIL TMPDIR=''${TMPDIR:-<unset>} is not under $scratch - the quota does not cover it"; bad=1 ;;
       esac
+
+      # C7-H1: VERIFY THE QUOTA, DO NOT CLAIM IT.
+      #
+      # Operator's finding. The healthy line read "ok (slice, quota, scratch, socket)"
+      # while testing no quota whatsoever. The qgroups existed only because somebody had
+      # set them by hand with root, so a seat added later would have got an unbounded
+      # plain directory and this line would STILL have said "ok". A message asserting a
+      # check it never makes is worse than no message: it turns the ABSENCE of a bound
+      # into positive evidence of one.
+      #
+      # Builder made the honest version cheap by withdrawing his own earlier claim that
+      # these need root: /sys/fs/btrfs/<uuid>/qgroups/0_<rootid>/ reads fine unprivileged,
+      # and so does `btrfs inspect-internal rootid`. So read the limit ACTUALLY IN FORCE
+      # and compare it against the table.
+      quota_line=""
+      if ! command -v btrfs >/dev/null 2>&1 || ! command -v findmnt >/dev/null 2>&1; then
+        say "WARN btrfs/findmnt missing - the scratch quota is UNVERIFIED, not confirmed"
+      else
+        qwant=$(jq -r --arg n "$seat" '.seats[$n].quota' "$J" 2>/dev/null)
+        qalarm=$(jq -r --arg n "$seat" '.seats[$n].alarm' "$J" 2>/dev/null)
+        rid=$(btrfs inspect-internal rootid "$scratch" 2>/dev/null) || rid=""
+        fsu=$(findmnt -no UUID -T "$scratch" 2>/dev/null) || fsu=""  # -T: a PATH, not a mountpoint
+        if [ -z "$rid" ] || [ -z "$fsu" ]; then
+          say "WARN could not identify the scratch subvolume - quota UNVERIFIED"
+        else
+          qd="/sys/fs/btrfs/$fsu/qgroups/0_$rid"
+          maxr=$(cat "$qd/max_referenced" 2>/dev/null) || maxr=""
+          usedr=$(cat "$qd/referenced" 2>/dev/null) || usedr=""
+          if [ -z "$maxr" ] || [ "$maxr" = "0" ]; then
+            say "FAIL $scratch has NO qgroup limit in force. The table says $qwant."
+            say "     Scratch is UNBOUNDED. Fix: sudo systemctl restart cycle-scratch-quota"
+            bad=1
+          elif [ -z "$usedr" ]; then
+            say "WARN the qgroup limit is set but usage is unreadable - alarm UNVERIFIED"
+          else
+            # C4-H1: the alarm had nowhere to go. It goes here. Pure bash arithmetic,
+            # because awk is NOT in this hook's runtimeInputs and assuming that it was is
+            # precisely the bug that deleted a live session on 2026-09-26.
+            t=$(( usedr * 10 / 1073741824 ))
+            quota_line=", quota $(( t / 10 )).$(( t % 10 ))/$(( maxr / 1073741824 )) GiB"
+            ab=$(numfmt --from=iec "$qalarm" 2>/dev/null) || ab=0
+            if [ "''${ab:-0}" -gt 0 ] && [ "$usedr" -ge "$ab" ] 2>/dev/null; then
+              say "WARN scratch is at $(( t / 10 )).$(( t % 10 )) GiB, past the $qalarm alarm (wall $qwant)."
+              say "     The wall must never be the first signal. Collect your garbage now."
+            fi
+          fi
+        fi
+      fi
 
       # A launcher that sanitised the environment would move the socket under the seat's
       # own temp dir, and the seats would silently stop seeing each other.
@@ -340,7 +390,9 @@ let
       fi
 
       if [ "$bad" = 0 ]; then
-        jq -n --arg m "cycle: seat $seat ok (slice, quota, scratch, socket)" \
+        # "quota" leaves this list unless the check above CONFIRMED one, in which case
+        # quota_line carries the measured usage instead of the bare word.
+        jq -n --arg m "cycle: seat $seat ok (slice, scratch, socket)''${quota_line}" \
           '{hookSpecificOutput:{hookEventName:"SessionStart",systemMessage:$m}}'
       else
         ctx="This seat is running OUTSIDE its isolation. Specifically:
@@ -582,8 +634,18 @@ relaunched with: seat $seat"
             fi
           fi
 
-          # Owner is alive and current.
-          [ -n "$verdict" ] || continue
+          # Owner is alive and current. SAY SO, rather than passing over in silence.
+          #
+          # This used to `continue` with no output, making each run a PARTIAL account of
+          # what it examined - and silence there is indistinguishable from "never looked".
+          # That ambiguity is the shape of four defects found on 2026-09-27: an empty grep
+          # reading as zero, a missing binary reading as dead, an unreadable owner reading
+          # as a death certificate, and a find failure reading as nothing-to-do. One line
+          # per live session per hour buys an output that accounts for everything it saw.
+          if [ -z "$verdict" ]; then
+            echo "KEEP: $d - owner pid $op is alive and from this boot."
+            continue
+          fi
 
           # DEATH PLUS AGE, IN EVERY BRANCH - this is the part C6 was missing. A live
           # session writes to its scratchpad constantly, so "untouched for a while" is an
@@ -662,6 +724,11 @@ relaunched with: seat $seat"
 in
 {
   options.cycle = {
+    owner = mkOption {
+      type = types.str;
+      default = "skirmitch";
+      description = "Who owns the seat scratch subvolumes. The seats run as this user.";
+    };
     scratchRoot = mkOption {
       type = types.str;
       default = "/mnt/scratch";
@@ -734,6 +801,100 @@ in
     # none. It is unprivileged; userns and overlayfs already work here without it being
     # system-installed.
     environment.systemPackages = [ seatLauncher sweeper limitsTool pkgs.bubblewrap ];
+
+    # C7-H1: NIX APPLIES THE QUOTA. Until now it did not, and nobody noticed because the
+    # limits were already there - set by hand with root on 2026-09-26. So "adding a seat
+    # is one attribute" was false: the attribute produced a slice, a database, a redis and
+    # a launcher, and then the seat got an UNBOUNDED plain directory, because the one
+    # layer that actually enforces was the one step left to human memory.
+    #
+    # That is the same defect as a comment claiming a check the code never makes. The
+    # difference is that this one costs a filled root disk rather than a wrong message.
+    systemd.services.cycle-scratch-quota = {
+      description = "Create and bound the per-seat scratch subvolumes";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "mnt-scratch.mount" ];
+      requires = [ "mnt-scratch.mount" ];
+      # RemainAfterExit, deliberately: a Type=oneshot without it runs TWICE, which is the
+      # documented cause of the May 2026 initrd failures on this machine.
+      serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+      path = [ pkgs.btrfs-progs pkgs.coreutils pkgs.jq pkgs.util-linux ];
+      script = ''
+        set -uo pipefail
+        ROOT="${cfg.scratchRoot}"
+        J=/etc/cycle/seats.json
+
+        # PREFLIGHT. This service creates subvolumes and sets limits, so a missing tool
+        # must stop it rather than silently change what it does. See the awk incident.
+        for t in btrfs jq mountpoint findmnt stat chown; do
+          command -v "$t" >/dev/null 2>&1 || { echo "REFUSE: $t is not on PATH"; exit 1; }
+        done
+
+        # THE CHECK THAT MATTERS MOST. /mnt/scratch is mounted nofail, so if the bulk disk
+        # does not come up this path is an ordinary directory on the OS disk. Creating the
+        # seat roots there would hand both seats unbounded scratch on root - which is the
+        # exact failure this entire design exists to prevent, arriving silently through
+        # the thing meant to prevent it.
+        if ! mountpoint -q "$ROOT"; then
+          echo "REFUSE: $ROOT is not a mountpoint - the bulk disk did not mount."
+          echo "        Creating seat scratch here would put it on the OS disk, unbounded."
+          exit 1
+        fi
+
+        [ -r "$J" ] || { echo "REFUSE: $J is unreadable"; exit 1; }
+
+        UUID=$(findmnt -no UUID -T "$ROOT") || UUID=""
+        [ -n "$UUID" ] || { echo "REFUSE: cannot read the filesystem UUID of $ROOT"; exit 1; }
+
+        if [ "$(cat "/sys/fs/btrfs/$UUID/qgroups/enabled" 2>/dev/null)" != "1" ]; then
+          echo "REFUSE: quotas are not enabled on $ROOT. Enable once, by hand:"
+          echo "        btrfs quota enable --simple $ROOT"
+          echo "        (simple qgroups account by extent lifetime - no backref walks)"
+          exit 1
+        fi
+
+        rc=0
+        for n in $(jq -r '.seats | keys[]' "$J"); do
+          pth=$(jq -r --arg n "$n" '.seats[$n].scratch' "$J")
+          q=$(jq -r --arg n "$n" '.seats[$n].quota' "$J")
+
+          case "$pth" in
+            "$ROOT"/*) ;;
+            *) echo "SKIP $n: $pth is not under $ROOT"; rc=1; continue ;;
+          esac
+
+          if [ ! -e "$pth" ]; then
+            btrfs subvolume create "$pth" || { echo "FAIL $n: could not create $pth"; rc=1; continue; }
+            chown ${cfg.owner}:users "$pth"
+            echo "created $pth"
+          fi
+
+          # Inode 256 is what makes a path a subvolume ROOT. A qgroup limit on a plain
+          # directory is accepted and enforces nothing, so this check is the difference
+          # between a bound and the appearance of one.
+          ino=$(stat -c %i "$pth" 2>/dev/null) || ino=""
+          if [ "$ino" != "256" ]; then
+            echo "FAIL $n: $pth exists but is NOT a subvolume root (inode ''${ino:-unreadable})."
+            echo "     A qgroup limit here would enforce nothing. Refusing to pretend."
+            rc=1; continue
+          fi
+
+          btrfs qgroup limit "$q" "$pth" || { echo "FAIL $n: could not set the limit"; rc=1; continue; }
+
+          # READ IT BACK. Setting a limit and reporting success without confirming it is
+          # the habit this whole module has been unlearning all day.
+          rid=$(btrfs inspect-internal rootid "$pth" 2>/dev/null) || rid=""
+          got=$(cat "/sys/fs/btrfs/$UUID/qgroups/0_$rid/max_referenced" 2>/dev/null) || got=0
+          if [ "''${got:-0}" -gt 0 ]; then
+            echo "$n: $pth rootid=$rid limit=$q, confirmed max_referenced=$got"
+          else
+            echo "FAIL $n: the limit read back as 0 - it did NOT take"
+            rc=1
+          fi
+        done
+        exit "$rc"
+      '';
+    };
 
     # One redis instance per seat. Builder measured why an index will not do: with
     # REDIS_URL=<host>/1 the repo's own test_celery_settings_default_to_single_db_with_
