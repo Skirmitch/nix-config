@@ -279,13 +279,22 @@ relaunched with: seat $seat"
   # The sweep. Seat-neutral, so Operator gets one for the first time.
   sweeper = pkgs.writeShellApplication {
     name = "cycle-scratch-sweep";
-    runtimeInputs = [ pkgs.coreutils pkgs.jq pkgs.findutils ];
+    runtimeInputs = [ pkgs.coreutils pkgs.jq pkgs.findutils pkgs.gawk ];
     text = ''
       set -uo pipefail
       J=/etc/cycle/seats.json
       [ -r "$J" ] || exit 0
       BOOT=$(cat /proc/sys/kernel/random/boot_id)
       DRY="''${CYCLE_SWEEP_DRY:-0}"
+
+      # PREFLIGHT. This sweep deletes directories, so a missing dependency must stop it
+      # rather than silently change what it decides. See the awk incident above.
+      for _t in jq find date; do
+        command -v "$_t" >/dev/null 2>&1 || {
+          echo "REFUSING to sweep: $_t is not on PATH; a missing tool must not be read as 'dead'"
+          exit 1
+        }
+      done
 
       # QUOTA ESCAPE DETECTOR.
       #
@@ -332,9 +341,37 @@ relaunched with: seat $seat"
               [ "$DRY" = 1 ] || rm -rf -- "$d"
               continue
             fi
-            now=$(awk '{print $22}' "/proc/$op/stat" 2>/dev/null || echo "")
-            if [ -z "$now" ] || [ "$now" != "$os" ]; then
-              echo "dead (pid gone or reused): $d"
+            # FAIL CLOSED: an unreadable probe means ALIVE, never dead.
+            #
+            # This deleted a LIVE session on 2026-09-26 at 22:00:07. The cause was
+            # `awk` - coreutils does NOT provide it and it was not in runtimeInputs, so
+            # inside the service it was command-not-found, my own 2>/dev/null swallowed
+            # the error, the variable came back empty, and EMPTY MEANT DELETE. It passed
+            # every test because an interactive shell has awk on PATH and the service
+            # does not. A missing binary must never be indistinguishable from a dead pid.
+            #
+            # Now parsed in pure bash with no external command at all. /proc/PID/stat is
+            # "pid (comm) state ..." and comm may contain spaces and parens, so strip
+            # through the LAST ") " before splitting; starttime is then field 20.
+            now=""
+            if [ -r "/proc/$op/stat" ]; then
+              statline=$(< "/proc/$op/stat") || statline=""
+              if [ -n "$statline" ]; then
+                rest=''${statline##*') '}
+                # shellcheck disable=SC2086
+                set -- $rest
+                now=''${20:-}
+              fi
+            fi
+
+            if [ ! -e "/proc/$op" ]; then
+              echo "dead (no such pid): $d"
+              [ "$DRY" = 1 ] || rm -rf -- "$d"
+            elif [ -z "$now" ]; then
+              echo "KEEPING $d - the pid exists but its starttime could not be read."
+              echo "        Refusing to delete on an unreadable probe."
+            elif [ "$now" != "$os" ]; then
+              echo "dead (pid reused, starttime $now != $os): $d"
               [ "$DRY" = 1 ] || rm -rf -- "$d"
             fi
           else
