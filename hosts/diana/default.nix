@@ -17,6 +17,7 @@
     ../../modules/system/users.nix
     ../../modules/system/swap.nix
     ../../modules/system/bulk-storage.nix
+    ../../modules/system/cooling.nix
     ../../modules/gaming
     ../../modules/apps/claude.nix
     ../../modules/apps/docker.nix
