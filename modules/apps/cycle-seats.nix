@@ -364,15 +364,30 @@ relaunched with: seat $seat"
               fi
             fi
 
+            # DEATH PLUS AGE, never death alone. Builder's rule (bt 570f91c), adopted
+            # because my death test has now been wrong twice. A live session writes to
+            # its scratchpad constantly, so "untouched for an hour" is an INDEPENDENT
+            # signal of death. Requiring both means a false liveness verdict - the exact
+            # failure that destroyed b7dbcc30 - cannot reach an active session.
+            verdict=""
             if [ ! -e "/proc/$op" ]; then
-              echo "dead (no such pid): $d"
-              [ "$DRY" = 1 ] || rm -rf -- "$d"
+              verdict="no such pid"
             elif [ -z "$now" ]; then
               echo "KEEPING $d - the pid exists but its starttime could not be read."
               echo "        Refusing to delete on an unreadable probe."
             elif [ "$now" != "$os" ]; then
-              echo "dead (pid reused, starttime $now != $os): $d"
-              [ "$DRY" = 1 ] || rm -rf -- "$d"
+              verdict="pid reused, starttime $now != $os"
+            fi
+
+            if [ -n "$verdict" ]; then
+              hot=$(date -d '1 hour ago' '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)
+              if [ -n "$hot" ] && [ -n "$(find "$d" -newermt "$hot" -print -quit 2>/dev/null)" ]; then
+                echo "KEEPING $d - owner looks dead ($verdict) but it was written to"
+                echo "        within the hour. Two signals must agree before removing."
+              else
+                echo "dead ($verdict) and cold >1h: $d"
+                [ "$DRY" = 1 ] || rm -rf -- "$d"
+              fi
             fi
           else
             # No owner file is exactly what a PLAIN launch produces, and a plain-launched
@@ -482,8 +497,21 @@ in
       description = "Reap scratch directories whose owning session is dead";
       serviceConfig = { Type = "oneshot"; ExecStart = "${sweeper}/bin/cycle-scratch-sweep"; };
     };
+    # THE TIMER SHIPS DISABLED. Deliberately.
+    #
+    # This reaper deleted a LIVE session's scratchpad on 2026-09-26 at 22:00:07
+    # (Builder's b7dbcc30) because `awk` was missing from the service PATH and my code
+    # read an empty probe as "dead". It is fixed and proven with a control - a live pid
+    # is kept, a nonexistent pid and a stale boot_id are reaped - but a thing that has
+    # destroyed data once does not get to re-arm itself on the next rebuild without
+    # somebody deciding that it should.
+    #
+    # To arm it, after satisfying yourself with:
+    #     CYCLE_SWEEP_DRY=1 cycle-scratch-sweep        # must list only genuinely dead dirs
+    # add `wantedBy = [ "timers.target" ];` back to this block, or start it by hand:
+    #     systemctl --user enable --now cycle-scratch-sweep.timer
+    # The service itself remains available and safe to run on demand, dry or wet.
     systemd.user.timers.cycle-scratch-sweep = {
-      wantedBy = [ "timers.target" ];
       timerConfig = { OnCalendar = "hourly"; Persistent = true; };
     };
 
