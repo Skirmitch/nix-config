@@ -127,7 +127,13 @@ let
     runtimeInputs = [ pkgs.coreutils pkgs.jq pkgs.systemd pkgs.gnugrep pkgs.btrfs-progs pkgs.util-linux ];
     text = ''
       set -uo pipefail
-      J=/etc/cycle/seats.json
+      # CYCLE_SEATS_JSON is a TEST SEAM matching the sweep's. Builder could not exercise
+      # the no-limit branch without one: he cannot remove a qgroup limit, but he CAN make
+      # a fresh unlimited subvolume inside his own scratch and point a fixture table at
+      # it. The override ANNOUNCES itself below, so a message produced against a fake
+      # table can never be mistaken for a real check - which is the exact failure this
+      # hook was just repaired for.
+      J="''${CYCLE_SEATS_JSON:-/etc/cycle/seats.json}"
       bad=0
       MSG=""
 
@@ -161,6 +167,10 @@ let
         case "$PWD" in "$HOME/$f"|"$HOME/$f"/*) here="$n"; break ;; esac
       done
       [ -n "$here" ] || exit 0          # not a seat folder: this hook has no opinion
+
+      if [ -n "''${CYCLE_SEATS_JSON:-}" ]; then
+        say "NOTE using the table at $J via CYCLE_SEATS_JSON - this is a TEST run"
+      fi
 
       seat="''${CYCLE_SEAT:-}"
       if [ -z "$seat" ]; then
@@ -225,7 +235,10 @@ let
             # C4-H1: the alarm had nowhere to go. It goes here. Pure bash arithmetic,
             # because awk is NOT in this hook's runtimeInputs and assuming that it was is
             # precisely the bug that deleted a live session on 2026-09-26.
-            t=$(( usedr * 10 / 1073741824 ))
+            # Round to the nearest tenth, do not floor. Builder measured 101 MB printing
+            # as 0.0; the same floor would read 9.9 for 9.99 directly beside an alarm
+            # threshold, which is the one place a number must not flatter itself.
+            t=$(( (usedr * 10 + 536870912) / 1073741824 ))
             quota_line=", quota $(( t / 10 )).$(( t % 10 ))/$(( maxr / 1073741824 )) GiB"
             ab=$(numfmt --from=iec "$qalarm" 2>/dev/null) || ab=0
             if [ "''${ab:-0}" -gt 0 ] && [ "$usedr" -ge "$ab" ] 2>/dev/null; then
@@ -885,8 +898,18 @@ in
           # the habit this whole module has been unlearning all day.
           rid=$(btrfs inspect-internal rootid "$pth" 2>/dev/null) || rid=""
           got=$(cat "/sys/fs/btrfs/$UUID/qgroups/0_$rid/max_referenced" 2>/dev/null) || got=0
-          if [ "''${got:-0}" -gt 0 ]; then
+          # Compare against the INTENDED value, not against zero. Builder's point: a
+          # -gt 0 test makes "confirmed" mean "some limit exists", which is not the claim
+          # the word makes. btrfs suffixes are 1024-based, so numfmt --from=iec matches.
+          want=$(numfmt --from=iec "$q" 2>/dev/null) || want=""
+          if [ -z "$want" ]; then
+            echo "FAIL $n: could not parse the table's quota '$q'"
+            rc=1
+          elif [ "''${got:-0}" = "$want" ]; then
             echo "$n: $pth rootid=$rid limit=$q, confirmed max_referenced=$got"
+          elif [ "''${got:-0}" -gt 0 ]; then
+            echo "FAIL $n: limit is $got bytes, the table asks for $q ($want bytes)"
+            rc=1
           else
             echo "FAIL $n: the limit read back as 0 - it did NOT take"
             rc=1
