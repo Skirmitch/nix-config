@@ -203,9 +203,17 @@ let
       # scratchpad directory outlives the process under --continue.
       sid="''${CLAUDE_CODE_SESSION_ID:-}"
       cpid="''${CLAUDE_PID:-$PPID}"
+      # Derive the path from the REAL temp base, not from the table.
+      #
+      # Using the table's value stamped an owner file into the bulk disk even when the
+      # session's actual scratchpad was on /tmp - a phantom directory mapping to nothing,
+      # which also polluted the sweep's view of what is alive. The harness builds its base
+      # as CLAUDE_CODE_TMPDIR || os.tmpdir() (which reads TMPDIR), so mirror that exactly
+      # and the owner file always lands beside the scratchpad it describes.
+      base="''${CLAUDE_CODE_TMPDIR:-''${TMPDIR:-/tmp}}"
       if [ -n "$sid" ]; then
         slug=$(echo "$PWD" | tr '/' '-')
-        d="$scratch/claude-$(id -u)/$slug/$sid"
+        d="$base/claude-$(id -u)/$slug/$sid"
         mkdir -p "$d" 2>/dev/null && {
           st=$(awk '{print $22}' "/proc/$cpid/stat" 2>/dev/null || echo 0)
           printf '{"boot_id":"%s","pid":%s,"starttime":%s,"seat":"%s"}\n' \
@@ -241,6 +249,35 @@ relaunched with: seat $seat"
       [ -r "$J" ] || exit 0
       BOOT=$(cat /proc/sys/kernel/random/boot_id)
       DRY="''${CYCLE_SWEEP_DRY:-0}"
+
+      # QUOTA ESCAPE DETECTOR.
+      #
+      # MEASURED 2026-09-26, and it is a real hole: an unprivileged user can run
+      # `btrfs subvolume create` inside their own quota'd scratch subvolume, and the new
+      # subvolume gets its OWN qgroup with no limit. Writing 36 GB past a 32 GB limit
+      # succeeded with no error. Plain directories ARE counted; only a nested subvolume
+      # escapes. Worse, a NON-EMPTY escaped subvolume cannot be removed without root
+      # (user_subvol_rm_allowed is absent from every mount), so it is also a cleanup trap.
+      #
+      # This cannot be PREVENTED from here - write access to a directory on btrfs implies
+      # the ability to create a subvolume in it, and the seats need write access. So it is
+      # detected and reported loudly instead. Two things bound the damage meanwhile:
+      # nothing in either seat's tooling creates subvolumes in scratch today, and an
+      # escape fills the BULK disk, never the OS disk, so the machine stays up.
+      #
+      # The permanent fix, if this ever bites: put scratch on a filesystem with no
+      # subvolumes at all - XFS or ext4 with project quotas, which inherit into
+      # subdirectories and cannot be escaped this way.
+      for seat in $(jq -r '.seats | keys[]' "$J"); do
+        root=$(jq -r --arg n "$seat" '.seats[$n].scratch' "$J")
+        [ -d "$root" ] || continue
+        # subvolume roots are always inode 256; the seat root itself is expected
+        find "$root" -mindepth 1 -xdev -inum 256 -type d 2>/dev/null | while IFS= read -r sv; do
+          echo "ESCAPE: $sv is a nested subvolume inside $seat's quota'd scratch."
+          echo "        It has its OWN qgroup and is NOT bound by the ''${seat} limit."
+          echo "        Size: $(du -sh "$sv" 2>/dev/null | cut -f1). Removing it needs root."
+        done
+      done
 
       for seat in $(jq -r '.seats | keys[]' "$J"); do
         root=$(jq -r --arg n "$seat" '.seats[$n].scratch' "$J")
