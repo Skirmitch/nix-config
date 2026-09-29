@@ -1103,11 +1103,48 @@ in
             rc=1; continue
           fi
 
-          btrfs qgroup limit "$q" "$pth" || { echo "FAIL $n: could not set the limit"; rc=1; continue; }
+          # THE ROOTID IS NEEDED BEFORE THE LIMIT CALL, NOT AFTER. See below.
+          rid=$(btrfs inspect-internal rootid "$pth" 2>/dev/null) || rid=""
+          if [ -z "$rid" ]; then
+            echo "FAIL $n: could not read the rootid of $pth"
+            rc=1; continue
+          fi
+
+          # A SEAT AT ITS WALL COULD NOT HAVE ITS WALL RAISED. Measured 2026-09-29 in a
+          # throwaway VM booting this host's exact linux-7.2.8 and btrfs-progs 7.1, on a
+          # mirror of the live layout:
+          #
+          #   btrfs qgroup limit 1G /mnt/scratch/operator        -> EDQUOT, rc=1
+          #   btrfs qgroup limit 1G 0/257 /mnt/scratch/operator  -> EDQUOT, rc=1
+          #   btrfs qgroup limit 1G 0/257 /mnt/scratch           -> rc=0, and the seat
+          #                                                        wrote 50M immediately
+          #
+          # So it is the PATH the ioctl is issued from that matters, not the qgroupid: the
+          # transaction updating the qgroup item takes its metadata reservation from the
+          # subvolume behind that fd, and a seat at its limit cannot pay it. The old form
+          # passed "$pth" - the seat's own subvolume - so it failed EXACTLY when raising a
+          # limit is the thing that would rescue the seat. Issue it from $ROOT instead,
+          # which is the scratch root, holds no quota of its own, and is already proven to
+          # be a mountpoint by the guard above.
+          #
+          # LOWERING below current usage is what creates that state, and lowering always
+          # SUCCEEDS (rc=0 in the VM) - it EDQUOTs the seat instantly and, with the old
+          # form, irreversibly. So refuse it. A deliberate shrink means stopping the seat
+          # and letting the sweep reclaim first.
+          used=$(cat "/sys/fs/btrfs/$UUID/qgroups/0_$rid/referenced" 2>/dev/null) || used=""
+          wantb=$(numfmt --from=iec "$q" 2>/dev/null) || wantb=""
+          if [ -n "$used" ] && [ -n "$wantb" ] && [ "$wantb" -lt "$used" ]; then
+            echo "FAIL $n: the table asks for $q ($wantb bytes) but $pth already holds"
+            echo "     $used bytes. Setting it would EDQUOT the seat on its next write, and"
+            echo "     a seat over its wall cannot be raised from its own path. Refusing."
+            echo "     To shrink deliberately: stop the seat, let the sweep reclaim, retry."
+            rc=1; continue
+          fi
+
+          btrfs qgroup limit "$q" "0/$rid" "$ROOT" || { echo "FAIL $n: could not set the limit"; rc=1; continue; }
 
           # READ IT BACK. Setting a limit and reporting success without confirming it is
           # the habit this whole module has been unlearning all day.
-          rid=$(btrfs inspect-internal rootid "$pth" 2>/dev/null) || rid=""
           got=$(cat "/sys/fs/btrfs/$UUID/qgroups/0_$rid/max_referenced" 2>/dev/null) || got=0
           # Compare against the INTENDED value, not against zero. Builder's point: a
           # -gt 0 test makes "confirmed" mean "some limit exists", which is not the claim
