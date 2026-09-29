@@ -73,6 +73,10 @@
       redisPort = 6380;
       scratchQuota = "32G"; scratchAlarm = "16G";
       memoryMax = "22G"; memorySwapMax = "4G"; tasksMax = 8192;
+      # JL's walk item 7, 2026-09-27: the live repos are READ-ONLY for this seat. Its
+      # gate enumerates spellings of a write and never converges; the kernel does not
+      # enumerate. Builder's list stays empty - he merges and pushes in here.
+      readOnlyPaths = [ "/home/skirmitch/lonchera/repos" ];
     };
     builder = {
       folder = "cycle-hq/Builder";

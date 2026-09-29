@@ -24,6 +24,7 @@ let
     seats = mapAttrs' (n: s: nameValuePair n {
       inherit (s) folder dbRole redisPort memoryMax memorySwapMax;
       scratch = scratchOf n;
+      readOnly = s.readOnlyPaths;
       quota = s.scratchQuota;
       alarm = s.scratchAlarm;
       databaseUrl = dbUrl s;
@@ -35,7 +36,7 @@ let
 
   seatLauncher = pkgs.writeShellApplication {
     name = "seat";
-    runtimeInputs = [ pkgs.systemd pkgs.coreutils pkgs.jq ];
+    runtimeInputs = [ pkgs.systemd pkgs.coreutils pkgs.jq pkgs.bubblewrap ];
     text = ''
       set -euo pipefail
       SEATS="${concatStringsSep " " seatNames}"
@@ -106,6 +107,42 @@ let
         args=("$@")
       fi
 
+      # READ-ONLY PATHS, enforced by the kernel rather than by reading command text.
+      #
+      # bwrap is used rather than systemd's ReadOnlyPaths= because a systemd SCOPE
+      # rejects sandboxing properties outright - measured: "Unknown assignment:
+      # ReadOnlyPaths=". Scopes adopt a process the caller already started, so there is
+      # no namespace for systemd to apply them in, and the launcher uses a scope
+      # deliberately: it is what keeps the terminal attached.
+      #
+      # `--dev-bind / /` passes the whole filesystem through UNCHANGED and writable; the
+      # ro-binds are the only difference. Measured 2026-09-29 inside such a namespace:
+      # cc-socks reachable (so the seats still see each other), scratch writable,
+      # ~/.claude writable, the postgres socket reachable, /proc intact.
+      wrap=()
+      ro=$(jq -r --arg n "$name" '.seats[$n].readOnly[]?' "$J" 2>/dev/null || true)
+      if [ -n "$ro" ]; then
+        # FAIL CLOSED. If a seat is declared read-only somewhere and the tool that
+        # enforces it is missing, launching anyway would hand it write access while
+        # everyone believes otherwise - the worst of both, and silent.
+        command -v bwrap >/dev/null 2>&1 || {
+          echo "seat: $name declares read-only paths but bwrap is not on PATH." >&2
+          echo "      Refusing to launch WITHOUT the protection everyone thinks is on." >&2
+          exit 1
+        }
+        wrap=(bwrap --dev-bind / /)
+        while IFS= read -r rp; do
+          [ -n "$rp" ] || continue
+          # bwrap dies cryptically on a missing source; say which path and why.
+          [ -e "$rp" ] || {
+            echo "seat: read-only path $rp does not exist; refusing to launch." >&2
+            exit 1
+          }
+          wrap+=(--ro-bind "$rp" "$rp")
+        done <<< "$ro"
+        wrap+=(--)
+      fi
+
       exec systemd-run --user --scope --quiet \
         --unit="cycle-$name-$$" \
         --slice="cycle-$name.slice" \
@@ -115,7 +152,7 @@ let
         --setenv=TMPDIR="$scratch" \
         --setenv=DATABASE_URL="$dburl" \
         --setenv=REDIS_URL="$rdurl" \
-        -- claude "''${args[@]}"
+        -- "''${wrap[@]}" claude "''${args[@]}"
     '';
   };
 
@@ -770,6 +807,26 @@ in
           memoryMax = mkOption { type = types.str; description = "Hard RAM ceiling."; };
           memorySwapMax = mkOption { type = types.str; description = "Hard SWAP ceiling. MemoryMax alone is NOT a bound: swap defaults to max with 93 GiB to grow into, which is the 2026-09-22 unclean reset."; };
           cpuWeight = mkOption { type = types.int; default = 100; description = "Relative CPU share. Weight, never quota."; };
+          readOnlyPaths = mkOption {
+            type = types.listOf types.str;
+            default = [ ];
+            description = ''
+              Paths this seat's processes see READ-ONLY, enforced by the kernel via a
+              bwrap mount namespace rather than by inspecting command text.
+
+              JL ruled this for the operator seat on 2026-09-27 (walk item 7). The
+              reason is that the alternative does not converge: Operator's command gate
+              tries to recognise every way of writing into the live repositories, and
+              each review round finds another spelling it misses - eval, watch, su -c,
+              bash -lc, tar --checkpoint-action, rg --pre, plain unlink, chmod, shred,
+              sort -o. Measured 2026-09-29: `unlink ~/lonchera/repos/backend/pyproject.toml`
+              from that seat would succeed today. At the OS no spelling lands, and the
+              gate's write rule becomes a courtesy instead of a wall.
+
+              Empty for a seat that needs none. The Builder's is empty deliberately: he
+              merges and pushes in ~/lonchera/repos and builds in ~/lonchera/worktrees.
+            '';
+          };
           tasksMax = mkOption {
             type = types.int; default = 8192;
             description = ''
