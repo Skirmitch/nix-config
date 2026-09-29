@@ -888,6 +888,14 @@ in
       # RemainAfterExit, deliberately: a Type=oneshot without it runs TWICE, which is the
       # documented cause of the May 2026 initrd failures on this machine.
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+      # A CHANGED QUOTA MUST ACTUALLY APPLY. This service reads the table at RUNTIME, so
+      # its unit script does not contain the quota value - and systemd restarts only units
+      # whose definition changed. Without this trigger, editing a quota in cycle.seats and
+      # rebuilding does NOTHING until somebody remembers to restart the service or reboots.
+      # A declared value that silently fails to take effect is the same defect as a comment
+      # claiming a check the code never makes; found while raising operator to 64G, which
+      # would have been the first instance of it.
+      restartTriggers = [ seatsJson ];
       path = [ pkgs.btrfs-progs pkgs.coreutils pkgs.jq pkgs.util-linux ];
       script = ''
         set -uo pipefail

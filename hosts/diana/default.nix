@@ -71,7 +71,23 @@
       folder = "cycle-hq/Operator";
       dbRole = "lonchera_operator";
       redisPort = 6380;
-      scratchQuota = "32G"; scratchAlarm = "16G";
+      # 32G -> 64G, 2026-09-29. JL offered double or +50% and Operator chose double.
+      # THE MEASURED CASE: at 13:10-13:30 this subvolume hit 33G against the 32G wall and
+      # agents in seven concurrent toolbox lanes died with [Errno 122]; several mutation
+      # and redtest runs were voided and re-run.
+      #
+      # BUT read Operator's own accounting before reading that as "32G was too small":
+      # 16G freed at 13:35 and 11.4G at 15:00, ALL of it scratch belonging to agents that
+      # had ALREADY RETURNED. 27.4G of the 33G was garbage. By their own words, "32G would
+      # likely have held today" with the cleanup step they are now adding - when a
+      # Workflow returns and its results are persisted, its agents' scratch is deleted.
+      #
+      # So the wall did its job: it caught uncollected garbage, which is exactly what JL
+      # built it for. Doubling is headroom for genuine growth - seven concurrent lanes,
+      # each agent copying 0.5-4G trees, and a parallel suite runner still to come - NOT a
+      # substitute for collecting it. 64G is 11% of the 586G free on the bulk disk, so the
+      # quota keeps its real job: catching a runaway long before it fills the device.
+      scratchQuota = "64G"; scratchAlarm = "32G";
       memoryMax = "22G"; memorySwapMax = "4G"; tasksMax = 8192;
       # JL's walk item 7, 2026-09-27: the live repos are READ-ONLY for this seat. Its
       # gate enumerates spellings of a write and never converges; the kernel does not
