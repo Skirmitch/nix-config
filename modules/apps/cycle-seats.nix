@@ -184,8 +184,10 @@ let
       #   systemMessage    -> JL sees it in the terminal
       #   additionalContext-> the SEAT reads it, which is what lets a seat refuse to work
       #                       unbounded instead of needing to check for itself.
-      # additionalContext is only emitted when something is WRONG, so a healthy launch
-      # costs one line of terminal and zero context tokens.
+      # additionalContext is emitted whenever anything was raised - FAIL or WARN - because
+      # a WARN like "past the alarm, collect your garbage" is for the SEAT to act on and
+      # systemMessage is read by JL only. A fully clean launch emits neither: one line of
+      # terminal and zero context tokens.
       say() { MSG="''${MSG}cycle: $*"$'\n'; }
 
       # SCOPE FIRST, AND SILENTLY.
@@ -266,21 +268,50 @@ let
             say "FAIL $scratch has NO qgroup limit in force. The table says $qwant."
             say "     Scratch is UNBOUNDED. Fix: sudo systemctl restart cycle-scratch-quota"
             bad=1
-          elif [ -z "$usedr" ]; then
-            say "WARN the qgroup limit is set but usage is unreadable - alarm UNVERIFIED"
           else
-            # C4-H1: the alarm had nowhere to go. It goes here. Pure bash arithmetic,
-            # because awk is NOT in this hook's runtimeInputs and assuming that it was is
-            # precisely the bug that deleted a live session on 2026-09-26.
-            # Round to the nearest tenth, do not floor. Builder measured 101 MB printing
-            # as 0.0; the same floor would read 9.9 for 9.99 directly beside an alarm
-            # threshold, which is the one place a number must not flatter itself.
-            t=$(( (usedr * 10 + 536870912) / 1073741824 ))
-            quota_line=", quota $(( t / 10 )).$(( t % 10 ))/$(( maxr / 1073741824 )) GiB"
-            ab=$(numfmt --from=iec "$qalarm" 2>/dev/null) || ab=0
-            if [ "''${ab:-0}" -gt 0 ] && [ "$usedr" -ge "$ab" ] 2>/dev/null; then
-              say "WARN scratch is at $(( t / 10 )).$(( t % 10 )) GiB, past the $qalarm alarm (wall $qwant)."
-              say "     The wall must never be the first signal. Collect your garbage now."
+            # C6-B3 (Builder, gen 262). The comment above says "compare it against the
+            # table"; the code compared against ZERO. Measured: a table reading 5G against
+            # the 20G limit actually in force printed "ok, quota 0.6/20 GiB". That is the
+            # silent divergence restartTriggers exists to prevent, and this hook is the
+            # backstop for when restartTriggers does NOT fire - a limit changed by hand, or
+            # a quota service that failed after the table moved. So use the same numfmt
+            # equality the quota service already uses: "confirmed" has to mean the TABLE's
+            # value, not merely "nonzero".
+            #
+            # WARN, not FAIL. The isolation IS in force here - a wall exists, the ceiling
+            # applies, the DB is right - so "LAUNCH IS DEGRADED" would be a false claim,
+            # and this file already learned that a message overstating the danger gets
+            # ignored at exactly the wrong moment. The DIRECTION is the actionable part.
+            qb=$(numfmt --from=iec "$qwant" 2>/dev/null) || qb=""
+            if [ -z "$qb" ]; then
+              say "WARN the table's quota ($qwant) is not a size numfmt parses, so the"
+              say "     limit in force ($maxr bytes) could not be checked against it."
+            elif [ "$qb" != "$maxr" ]; then
+              say "WARN the limit IN FORCE is $maxr bytes; the table says $qwant = $qb bytes."
+              if [ "$maxr" -lt "$qb" ]; then
+                say "     You will hit EDQUOT EARLIER than the table promises."
+              else
+                say "     You have more room than the table promises."
+              fi
+              say "     Fix: sudo systemctl restart cycle-scratch-quota"
+            fi
+
+            if [ -z "$usedr" ]; then
+              say "WARN the qgroup limit is set but usage is unreadable - alarm UNVERIFIED"
+            else
+              # C4-H1: the alarm had nowhere to go. It goes here. Pure bash arithmetic,
+              # because awk is NOT in this hook's runtimeInputs and assuming that it was is
+              # precisely the bug that deleted a live session on 2026-09-26.
+              # Round to the nearest tenth, do not floor. Builder measured 101 MB printing
+              # as 0.0; the same floor would read 9.9 for 9.99 directly beside an alarm
+              # threshold, which is the one place a number must not flatter itself.
+              t=$(( (usedr * 10 + 536870912) / 1073741824 ))
+              quota_line=", quota $(( t / 10 )).$(( t % 10 ))/$(( maxr / 1073741824 )) GiB"
+              ab=$(numfmt --from=iec "$qalarm" 2>/dev/null) || ab=0
+              if [ "''${ab:-0}" -gt 0 ] && [ "$usedr" -ge "$ab" ] 2>/dev/null; then
+                say "WARN scratch is at $(( t / 10 )).$(( t % 10 )) GiB, past the $qalarm alarm (wall $qwant)."
+                say "     The wall must never be the first signal. Collect your garbage now."
+              fi
             fi
           fi
         fi
@@ -442,8 +473,30 @@ let
       if [ "$bad" = 0 ]; then
         # "quota" leaves this list unless the check above CONFIRMED one, in which case
         # quota_line carries the measured usage instead of the bare word.
-        jq -n --arg m "cycle: seat $seat ok (slice, scratch, socket)''${quota_line}" \
-          '{hookSpecificOutput:{hookEventName:"SessionStart",systemMessage:$m}}'
+        okline="cycle: seat $seat ok (slice, scratch, socket)''${quota_line}"
+        if [ -z "$MSG" ]; then
+          jq -n --arg m "$okline" \
+            '{hookSpecificOutput:{hookEventName:"SessionStart",systemMessage:$m}}'
+        else
+          # C6-B1/B2 (Builder, gen 262). This branch used to build the ok line WITHOUT
+          # $MSG, so EVERY WARN and EVERY NOTE was discarded whenever nothing set bad=1.
+          # Three measured consequences:
+          #   - the alarm JL asked for by name - "an alarm at half, so the wall is never
+          #     the first signal" - had never printed once since it was written;
+          #   - a message built against a CYCLE_SEATS_JSON fixture was byte-identical to a
+          #     real check, the exact opposite of what the seam comment above promises;
+          #   - it made the missing `findmnt -T` SILENT rather than loud. The no-T mutant
+          #     prints the ok line minus the word "quota"; its "quota UNVERIFIED" WARN went
+          #     into this same hole. Two bugs that hid each other.
+          #
+          # WARNs go to additionalContext as well: "collect your garbage now" is for the
+          # SEAT to act on, and systemMessage is read by JL only.
+          jq -n --arg m "''${MSG}$okline" --arg c "This seat IS inside its isolation, but the SessionStart check raised warnings:
+''${MSG}
+Act on the ones that are yours to act on - a scratch alarm means collect your garbage now,
+while there is still room between you and the wall. Tell the user about the rest." \
+            '{hookSpecificOutput:{hookEventName:"SessionStart",systemMessage:$m,additionalContext:$c}}'
+        fi
       else
         ctx="This seat is running OUTSIDE its isolation. Specifically:
 ''${MSG}
