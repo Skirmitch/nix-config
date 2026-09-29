@@ -173,6 +173,9 @@ let
       J="''${CYCLE_SEATS_JSON:-/etc/cycle/seats.json}"
       bad=0
       MSG=""
+      # C6-B4: set ONLY where the wall IN FORCE was actually read. The reassurance in the
+      # context below is earned by this, never by the mere absence of a FAIL.
+      quota_verified=0
 
       # OUTPUT CHANNEL: JSON on stdout, exit 0. NOT stderr.
       #
@@ -269,6 +272,7 @@ let
             say "     Scratch is UNBOUNDED. Fix: sudo systemctl restart cycle-scratch-quota"
             bad=1
           else
+            quota_verified=1
             # C6-B3 (Builder, gen 262). The comment above says "compare it against the
             # table"; the code compared against ZERO. Measured: a table reading 5G against
             # the 20G limit actually in force printed "ok, quota 0.6/20 GiB". That is the
@@ -296,6 +300,33 @@ let
               say "     Fix: sudo systemctl restart cycle-scratch-quota"
             fi
 
+            # C6-B5 (Builder, gen 262). CAN THE ALARM FIRE AT ALL?
+            #
+            # The failure JL forbade by name - "the wall must never be the first signal" -
+            # is the ALARM against the WALL IN FORCE. It is NOT the table's quota against
+            # the wall, which is what the check above compares; conflating the two was my
+            # mistake when I asked Builder whether that one should FAIL. He measured four
+            # tables that each printed a clean "ok ..., quota 0.6/20 GiB", nothing raised:
+            #   alarm 64G over a 20G wall - it can never fire before EDQUOT;
+            #   alarm 20G, exactly equal to the wall - same;
+            #   alarm "bogus" - numfmt fails, ab=0, and the -gt 0 test skipped it SILENTLY;
+            #   alarm key absent  - jq yields the string "null", same silence.
+            # In all four the alarm is decoration and the wall is the only signal, which is
+            # precisely the state JL ruled out. So judge the alarm before trusting it.
+            #
+            # ab= lives here, not in the usage branch below, because whether the alarm CAN
+            # fire does not depend on usage being readable.
+            ab=$(numfmt --from=iec "$qalarm" 2>/dev/null) || ab=0
+            if [ "''${ab:-0}" -le 0 ] 2>/dev/null; then
+              say "WARN the table's alarm for this seat is \"$qalarm\", which is not a size"
+              say "     I can read - so NOTHING will warn you before EDQUOT and the wall"
+              say "     WILL be the first signal. Set cycle.seats.$seat.scratchAlarm."
+            elif [ "$ab" -ge "$maxr" ] 2>/dev/null; then
+              say "WARN the alarm ($qalarm = $ab bytes) is at or above the wall in force"
+              say "     ($maxr bytes), so it can never fire first. The wall WILL be the"
+              say "     first signal. Lower cycle.seats.$seat.scratchAlarm."
+            fi
+
             if [ -z "$usedr" ]; then
               say "WARN the qgroup limit is set but usage is unreadable - alarm UNVERIFIED"
             else
@@ -307,7 +338,6 @@ let
               # threshold, which is the one place a number must not flatter itself.
               t=$(( (usedr * 10 + 536870912) / 1073741824 ))
               quota_line=", quota $(( t / 10 )).$(( t % 10 ))/$(( maxr / 1073741824 )) GiB"
-              ab=$(numfmt --from=iec "$qalarm" 2>/dev/null) || ab=0
               if [ "''${ab:-0}" -gt 0 ] && [ "$usedr" -ge "$ab" ] 2>/dev/null; then
                 say "WARN scratch is at $(( t / 10 )).$(( t % 10 )) GiB, past the $qalarm alarm (wall $qwant)."
                 say "     The wall must never be the first signal. Collect your garbage now."
@@ -491,7 +521,19 @@ let
           #
           # WARNs go to additionalContext as well: "collect your garbage now" is for the
           # SEAT to act on, and systemMessage is read by JL only.
-          jq -n --arg m "''${MSG}$okline" --arg c "This seat IS inside its isolation, but the SessionStart check raised warnings:
+          # C6-B4 (Builder, gen 262): "This seat IS inside its isolation" must NOT be
+          # printed when the quota check could not run. His world: a table naming a tmpfs
+          # scratch, so rootid and UUID both fail, "quota UNVERIFIED" is raised with
+          # bad=0 - and the context then asserted the very check the message had just said
+          # it could not make. That is this file's own C7-H1 class, and the same sentence
+          # would follow any future regression back to the no-T world. So the reassurance
+          # is earned by quota_verified, not by the absence of a FAIL.
+          if [ "$quota_verified" = 1 ]; then
+            lead="This seat IS inside its isolation, but the SessionStart check raised warnings:"
+          else
+            lead="The SessionStart check raised warnings:"
+          fi
+          jq -n --arg m "''${MSG}$okline" --arg c "$lead
 ''${MSG}
 Act on the ones that are yours to act on - a scratch alarm means collect your garbage now,
 while there is still room between you and the wall. Tell the user about the rest." \
@@ -514,7 +556,9 @@ relaunched with: seat $seat"
   # The sweep. Seat-neutral, so Operator gets one for the first time.
   sweeper = pkgs.writeShellApplication {
     name = "cycle-scratch-sweep";
-    runtimeInputs = [ pkgs.coreutils pkgs.jq pkgs.findutils pkgs.gawk ];
+    # btrfs-progs + util-linux: esc_bytes reads a nested subvolume's qgroup instead of
+    # shelling out to du. Declared, not assumed - see the awk incident inside.
+    runtimeInputs = [ pkgs.coreutils pkgs.jq pkgs.findutils pkgs.gawk pkgs.btrfs-progs pkgs.util-linux ];
     text = ''
       # errexit IS ON HERE, whatever this line suggests. writeShellApplication injects
       # `set -o errexit -o nounset -o pipefail` ABOVE this text, and `set -uo pipefail`
@@ -598,14 +642,37 @@ relaunched with: seat $seat"
         }
       done
 
+      # Size from the qgroup's own `referenced`, NEVER from du: du overcounts 13.5x on
+      # this filesystem, and the entire value of this line is a number somebody will act
+      # on. btrfs and findmnt are not ASSUMED - they were absent from this tool's
+      # runtimeInputs until today, and assuming a tool is present is the awk bug that cost
+      # a live session. A missing one costs the SIZE, never the DETECTION: the scan below
+      # is `find -inum 256`, which needs only findutils.
+      esc_bytes() {
+        command -v btrfs   >/dev/null 2>&1 || { echo ""; return 0; }
+        command -v findmnt >/dev/null 2>&1 || { echo ""; return 0; }
+        _r=$(btrfs inspect-internal rootid "$1" 2>/dev/null) || { echo ""; return 0; }
+        _u=$(findmnt -no UUID -T "$1" 2>/dev/null) || { echo ""; return 0; }
+        [ -n "$_r" ] && [ -n "$_u" ] || { echo ""; return 0; }
+        cat "/sys/fs/btrfs/$_u/qgroups/0_$_r/referenced" 2>/dev/null || echo ""
+      }
+
       # QUOTA ESCAPE DETECTOR.
       #
       # MEASURED 2026-09-26, and it is a real hole: an unprivileged user can run
       # `btrfs subvolume create` inside their own quota'd scratch subvolume, and the new
       # subvolume gets its OWN qgroup with no limit. Writing 36 GB past a 32 GB limit
       # succeeded with no error. Plain directories ARE counted; only a nested subvolume
-      # escapes. Worse, a NON-EMPTY escaped subvolume cannot be removed without root
-      # (user_subvol_rm_allowed is absent from every mount), so it is also a cleanup trap.
+      # escapes.
+      #
+      # CORRECTION 2026-09-29: this comment used to claim a non-empty escaped subvolume
+      # "cannot be removed without root (user_subvol_rm_allowed is absent from every
+      # mount)". The mount option is indeed absent, and the claim is still FALSE. Measured
+      # on boot 262: created a nested subvolume holding 1.1 MB across two files and nested
+      # directories, then `rm -rf` of its parent as skirmitch returned exit 0 with nothing
+      # left behind. The owner may delete a subvolume they own once it is empty, and rm -rf
+      # empties it first. So this is a quota hole, NOT a cleanup trap, and the sweep's own
+      # reaper can clear one unaided - which is what Builder asked me to check.
       #
       # This cannot be PREVENTED from here - write access to a directory on btrfs implies
       # the ability to create a subvolume in it, and the seats need write access. So it is
@@ -625,7 +692,14 @@ relaunched with: seat $seat"
           [ -n "$sv" ] || continue
           echo "ESCAPE: $sv is a nested subvolume inside $seat's quota'd scratch."
           echo "        It has its OWN qgroup and is NOT bound by the ''${seat} limit."
-          echo "        Size: $(du -sh "$sv" 2>/dev/null | cut -f1). Removing it needs root."
+          _eb=$(esc_bytes "$sv")
+          if [ -n "$_eb" ]; then
+            echo "        referenced: $_eb bytes ($(( _eb / 1048576 )) MiB), from its qgroup."
+          else
+            echo "        referenced: UNKNOWN - btrfs/findmnt unavailable. The escape stands."
+          fi
+          echo "        Remove with: rm -rf $sv  (measured: works as the owning user,"
+          echo "        non-empty included - no root needed.)"
         done < "$SCAN_OUT"
         rm -f "$SCAN_OUT"
       done
@@ -957,7 +1031,7 @@ in
 
         # PREFLIGHT. This service creates subvolumes and sets limits, so a missing tool
         # must stop it rather than silently change what it does. See the awk incident.
-        for t in btrfs jq mountpoint findmnt stat chown; do
+        for t in btrfs jq mountpoint findmnt stat chown chmod; do
           command -v "$t" >/dev/null 2>&1 || { echo "REFUSE: $t is not on PATH"; exit 1; }
         done
 
@@ -971,6 +1045,25 @@ in
           echo "        Creating seat scratch here would put it on the OS disk, unbounded."
           exit 1
         fi
+
+        # ESCAPE 1, CLOSED rather than detected (measured 2026-09-29, boot 262).
+        #
+        # $ROOT was skirmitch:users drwxr-xr-x, so `mkdir /mnt/scratch/anything` succeeded
+        # and landed in the ROOT subvolume's own qgroup - 0_257, max_referenced=0, entirely
+        # unbounded, with no btrfs command needed at all. I created and removed a probe to
+        # confirm. That is reachable BY ACCIDENT from any tool carrying a hardcoded path or
+        # a `..`, which is squarely JL's threat model of forgetfulness rather than malice,
+        # and it is a wider hole than the nested subvolume the sweep detects.
+        #
+        # Root-owning the top level closes it at the kernel. Safe because this service is
+        # the ONLY thing that creates a seat root - as root, below, then chown to the owner
+        # - and each seat writes inside its own subvolume, which it owns. Checked with
+        # Builder: the top level holds exactly the seat subvolumes and nothing else, and
+        # nothing in either seat's tooling writes there, since everything derives from
+        # TMPDIR. Side benefit he pointed out: the seats can no longer rename or unlink
+        # each other's scratch roots.
+        chown root:root "$ROOT"
+        chmod 755 "$ROOT"
 
         [ -r "$J" ] || { echo "REFUSE: $J is unreadable"; exit 1; }
 
