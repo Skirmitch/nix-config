@@ -113,10 +113,21 @@
       # files: none writes into either root, so the lock breaks nothing it runs. JL chose
       # lock-then-swap, so the gate swap waits on this landing.
       #
-      # NOT INCLUDED: /home/skirmitch/closure-worktrees (8.2 GiB, 24 entries). The
-      # ruling names the Builder's folder and his build worktrees; closure-worktrees is
-      # where the operator's OWN mutant lane clones from, so locking it would likely
-      # break the requester. Raised with Operator rather than assumed either way.
+      # NOT INCLUDED, and this is the ruling's own scope rather than a judgement call:
+      # /home/skirmitch/closure-worktrees. It is NOT an estate root. The gate defines
+      # them itself, and the list is exactly these three - verified in the gate source,
+      # not in a report about it:
+      #
+      #   Operator/tools/hooks/op-gate.py:1166  (and op-gate.prev.py:684, identical)
+      #   ESTATE_ROOTS = ('/home/skirmitch/lonchera/repos',
+      #                   '/home/skirmitch/lonchera/worktrees',
+      #                   '/home/skirmitch/cycle-hq/Builder')
+      #
+      # repos was already locked, so JL's "those two folders" is precisely the estate
+      # roots that were not. After this, the locked set and ESTATE_ROOTS coincide.
+      # closure-worktrees holds the operator's own repo toolbox lanes (T2-gate and the
+      # rest), which it writes to BY DESIGN, so locking it would break the seat that
+      # asked for the lock while protecting nothing the gate is responsible for.
       readOnlyPaths = [
         "/home/skirmitch/lonchera/repos"
         "/home/skirmitch/cycle-hq/Builder"
