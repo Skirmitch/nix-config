@@ -10,6 +10,13 @@ let
   dbUrl = s: "postgres://${s.dbRole}@/${s.dbRole}?host=/run/postgresql";
   redisUrl = s: "redis://127.0.0.1:${toString s.redisPort}/0";
   scratchOf = n: "${cfg.scratchRoot}/${n}";
+  # TMPDIR points HERE, one level inside the quota'd subvolume, so that a stray
+  # `$TMPDIR/..` lands on the subvolume root - still fully counted, run survives -
+  # instead of on the scratch ROOT, which is a different subvolume with no limit.
+  # Measured 2026-09-29: two Operator agents wrote `> $TMPDIR/../pins.txt` before
+  # re-pointing TMPDIR, and both files escaped the quota entirely. One `..` is the
+  # whole distance. It MUST be a plain directory - see the quota service.
+  tmpOf = n: "${scratchOf n}/tmp";
 
   # /etc/cycle/seats.json — a CROSS-CHECK, not a source.
   #
@@ -23,7 +30,12 @@ let
     scratchRoot = cfg.scratchRoot;
     seats = mapAttrs' (n: s: nameValuePair n {
       inherit (s) folder dbRole redisPort memoryMax memorySwapMax;
+      # `scratch` is the quota'd SUBVOLUME and keeps that meaning. Do not remove it:
+      # the Builder's bt_lib/_seats.py:60 requires the key and REFUSES every
+      # subcommand when it is absent, although it never reads the value. `tmp` is
+      # added beside it; every reader below takes whichever it actually needs.
       scratch = scratchOf n;
+      tmp = tmpOf n;
       readOnly = s.readOnlyPaths;
       quota = s.scratchQuota;
       alarm = s.scratchAlarm;
@@ -57,6 +69,10 @@ let
       dburl=$( jq -r --arg n "$name" '.seats[$n].databaseUrl' "$J")
       rdurl=$( jq -r --arg n "$name" '.seats[$n].redisUrl'    "$J")
       scratch=$(jq -r --arg n "$name" '.seats[$n].scratch'    "$J")
+      # `// empty` so a table without the key falls back to today's behaviour rather
+      # than to the literal string "null", which would be a path.
+      tmp=$(jq -r --arg n "$name" '.seats[$n].tmp // empty' "$J")
+      [ -n "$tmp" ] || tmp="$scratch"
 
       # FAIL CLOSED.
       #
@@ -65,8 +81,8 @@ let
       # `mkdir -p` fails, TMPDIR stays unset, and every byte lands back on the OS disk -
       # silently, which is the exact failure this whole module exists to end. A hostile
       # review found it independently. If the bound is not there, do not run.
-      if [ ! -d "$scratch" ] || [ ! -w "$scratch" ]; then
-        echo "seat: REFUSING - $scratch is missing or not writable." >&2
+      if [ ! -d "$tmp" ] || [ ! -w "$tmp" ]; then
+        echo "seat: REFUSING - $tmp is missing or not writable." >&2
         echo "seat: the disk quota is the only thing that enforces the scratch bound," >&2
         echo "seat: so launching without it would put the bytes back on the OS disk." >&2
         echo "seat: check that /mnt/scratch is mounted (it is nofail, so it can be absent)." >&2
@@ -148,8 +164,8 @@ let
         --slice="cycle-$name.slice" \
         -p OOMPolicy=continue \
         --setenv=CYCLE_SEAT="$name" \
-        --setenv=CLAUDE_CODE_TMPDIR="$scratch" \
-        --setenv=TMPDIR="$scratch" \
+        --setenv=CLAUDE_CODE_TMPDIR="$tmp" \
+        --setenv=TMPDIR="$tmp" \
         --setenv=DATABASE_URL="$dburl" \
         --setenv=REDIS_URL="$rdurl" \
         -- "''${wrap[@]}" claude "''${args[@]}"
@@ -235,9 +251,19 @@ let
       grep -q "cycle-$seat.slice" /proc/self/cgroup 2>/dev/null \
         || { say "FAIL not in cycle-$seat.slice - memory limits do NOT apply"; bad=1; }
 
+      # TWO paths, and they are not interchangeable. `scratch` is the quota'd
+      # SUBVOLUME - the qgroup below is read from it. `tmp` is where TMPDIR points,
+      # one level inside it. Checking TMPDIR against the subvolume would also pass
+      # for $scratch/anything, which is weaker than the thing being asserted.
       scratch=$(jq -r --arg n "$seat" '.seats[$n].scratch' "$J")
-      case "''${TMPDIR:-}" in "$scratch"*) ;; *)
-        say "FAIL TMPDIR=''${TMPDIR:-<unset>} is not under $scratch - the quota does not cover it"; bad=1 ;;
+      tmp=$(jq -r --arg n "$seat" '.seats[$n].tmp // empty' "$J")
+      if [ -z "$tmp" ]; then
+        say "WARN the table has no tmp for $seat - checking TMPDIR against the"
+        say "     subvolume instead. A fixture table predating the relayout does this."
+        tmp="$scratch"
+      fi
+      case "''${TMPDIR:-}" in "$tmp"*) ;; *)
+        say "FAIL TMPDIR=''${TMPDIR:-<unset>} is not under $tmp - the quota does not cover it"; bad=1 ;;
       esac
 
       # C7-H1: VERIFY THE QUOTA, DO NOT CLAIM IT.
@@ -683,6 +709,11 @@ relaunched with: seat $seat"
       # The permanent fix, if this ever bites: put scratch on a filesystem with no
       # subvolumes at all - XFS or ext4 with project quotas, which inherit into
       # subdirectories and cannot be escaped this way.
+      # THIS ONE SCANS THE SUBVOLUME, NOT tmp, AND THAT IS DELIBERATE. The reaper
+      # below moved to `tmp` with the relayout; this did not. A nested subvolume
+      # created at $scratch/esc - beside tmp rather than inside it - escapes the wall
+      # exactly as one inside tmp does, and scanning tmp would stop seeing it. The two
+      # roots move in OPPOSITE directions and both mistakes are silent.
       for seat in $(jq -r '.seats | keys[]' "$J"); do
         root=$(jq -r --arg n "$seat" '.seats[$n].scratch' "$J")
         [ -d "$root" ] || continue
@@ -704,8 +735,12 @@ relaunched with: seat $seat"
         rm -f "$SCAN_OUT"
       done
 
+      # THIS ONE FOLLOWS tmp, because that is where the harness lays sessions out.
+      # Left on the subvolume the -path match below finds NOTHING and no session dir
+      # is ever reaped - silent accumulation, which is the 2026-09-26 failure.
       for seat in $(jq -r '.seats | keys[]' "$J"); do
-        root=$(jq -r --arg n "$seat" '.seats[$n].scratch' "$J")
+        root=$(jq -r --arg n "$seat" '.seats[$n].tmp // empty' "$J")
+        [ -n "$root" ] || root=$(jq -r --arg n "$seat" '.seats[$n].scratch' "$J")
         [ -d "$root" ] || continue
         scan "$root" -mindepth 3 -maxdepth 3 -type d -path "$root/claude-$UIDN/*/*"
         while IFS= read -r d; do
@@ -1091,6 +1126,41 @@ in
             btrfs subvolume create "$pth" || { echo "FAIL $n: could not create $pth"; rc=1; continue; }
             chown ${cfg.owner}:users "$pth"
             echo "created $pth"
+          fi
+
+          # THE TMPDIR DIRECTORY, AND THE ASSERTION THAT MAKES THE RELAYOUT SAFE.
+          #
+          # TMPDIR points one level inside the subvolume so a stray `$TMPDIR/..` stays
+          # counted. It MUST be a plain directory. If it were ever a subvolume it would
+          # get its OWN qgroup with no limit, and then EVERY byte the seat writes would
+          # leave its wall - while the hook, still reading the subvolume beside it, went
+          # on reporting a healthy "quota 9.3/64 GiB". An instrument reporting health
+          # while the bound is gone is the worst shape in this design, and it is strictly
+          # worse than not doing the relayout at all. So assert it, every run, and refuse.
+          tpth=$(jq -r --arg n "$n" '.seats[$n].tmp // empty' "$J")
+          if [ -n "$tpth" ]; then
+            case "$tpth" in
+              "$pth"/*) ;;
+              *) echo "FAIL $n: tmp $tpth is not inside $pth"; rc=1; continue ;;
+            esac
+            if [ ! -e "$tpth" ]; then
+              mkdir -p "$tpth" || { echo "FAIL $n: could not create $tpth"; rc=1; continue; }
+              chown ${cfg.owner}:users "$tpth"
+              chmod 700 "$tpth"
+              echo "created $tpth"
+            fi
+            tino=$(stat -c %i "$tpth" 2>/dev/null) || tino=""
+            if [ "$tino" = "256" ]; then
+              echo "FAIL $n: $tpth is a SUBVOLUME (inode 256), not a plain directory."
+              echo "     It would carry its own unlimited qgroup, so everything the seat"
+              echo "     writes would escape the $q wall while the hook still reported it"
+              echo "     healthy from the subvolume beside it. Fix: stop the seat, move its"
+              echo "     contents out, btrfs subvolume delete $tpth, then rerun this unit."
+              rc=1; continue
+            elif [ -z "$tino" ]; then
+              echo "FAIL $n: could not stat $tpth to prove it is not a subvolume"
+              rc=1; continue
+            fi
           fi
 
           # Inode 256 is what makes a path a subvolume ROOT. A qgroup limit on a plain
