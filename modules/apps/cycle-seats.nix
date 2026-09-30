@@ -738,9 +738,31 @@ relaunched with: seat $seat"
       # THIS ONE FOLLOWS tmp, because that is where the harness lays sessions out.
       # Left on the subvolume the -path match below finds NOTHING and no session dir
       # is ever reaped - silent accumulation, which is the 2026-09-26 failure.
-      for seat in $(jq -r '.seats | keys[]' "$J"); do
-        root=$(jq -r --arg n "$seat" '.seats[$n].tmp // empty' "$J")
-        [ -n "$root" ] || root=$(jq -r --arg n "$seat" '.seats[$n].scratch' "$J")
+      #
+      # AND IT SWEEPS THE LEGACY ROOT TOO. Moving TMPDIR one level deeper ORPHANS
+      # everything the harness already laid out at $scratch/claude-<uid>: the -path
+      # match is anchored to its root, so the new root cannot see the old tree, and it
+      # would sit inside the seat's quota forever with nothing able to reap it.
+      # Measured 2026-09-30, before the move: 0.89 GiB for operator (27% of its charged
+      # bytes) and 0.77 GiB for builder (82% of its). That is this reaper's own failure
+      # mode, reintroduced by the change meant to improve safety.
+      #
+      # NO DOUBLE COUNTING. A session under the new root sits at
+      # $scratch/tmp/claude-<uid>/<slug>/<sid>, which is depth FOUR from $scratch, while
+      # the scan is -mindepth 3 -maxdepth 3 anchored at "$root/claude-<uid>/*/*". The
+      # pass over $scratch therefore sees the legacy tree and nothing else.
+      #
+      # SELF-RETIRING: once the legacy tree is gone the extra pass finds nothing and
+      # costs one find. The second line is emitted only when tmp and scratch actually
+      # differ, so a table without the relayout yields exactly one pass per seat.
+      ROOTS=$(mktemp) || { echo "REFUSE: mktemp failed"; exit 1; }
+      jq -r '.seats | to_entries[] | .key as $n | .value as $v
+             | ((($v.tmp // "") | if . == "" then $v.scratch else . end)) as $t
+             | "\($n) \($t)",
+               (if $t != $v.scratch then "\($n) \($v.scratch)" else empty end)' \
+        "$J" > "$ROOTS"
+      while read -r seat root; do
+        [ -n "$seat" ] || continue
         [ -d "$root" ] || continue
         scan "$root" -mindepth 3 -maxdepth 3 -type d -path "$root/claude-$UIDN/*/*"
         while IFS= read -r d; do
@@ -880,7 +902,8 @@ relaunched with: seat $seat"
           fi
         done < "$SCAN_OUT"
         rm -f "$SCAN_OUT"
-      done
+      done < "$ROOTS"
+      rm -f "$ROOTS"
     '';
   };
   # cycle-limits: what is ACTUALLY in force, and the one invariant a seat can break.
