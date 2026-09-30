@@ -92,7 +92,36 @@
       # JL's walk item 7, 2026-09-27: the live repos are READ-ONLY for this seat. Its
       # gate enumerates spellings of a write and never converges; the kernel does not
       # enumerate. Builder's list stays empty - he merges and pushes in here.
-      readOnlyPaths = [ "/home/skirmitch/lonchera/repos" ];
+      # Read-only for the OPERATOR seat only, at the kernel, via the bwrap ro-binds
+      # the launcher applies. The Builder keeps full write on all three: he has
+      # readOnly = [ ] and therefore no bwrap wrapper at all, so this cannot reach him.
+      #
+      # JL's ruling, 2026-09-30T13:58:45Z, typed: "a, ur recommendation", against an
+      # either/or that named option (a) as "lock those two folders read-only for my
+      # seat at the OS level, the way the repos already are, then swap". Verified in
+      # the primary transcript, not taken from the relay: dccf885b...jsonl line 132375,
+      # type=user, promptSource=typed, origin.kind=human, sha256(text) de6ee16b7236f0db,
+      # with the options at 132299 and re-posted at 132322.
+      #
+      # WHY the two new ones. Operator is swapping in a new op-gate that is safer on
+      # everything its safety rules can read, but 24 file-writing command shapes are
+      # blocked today only BY ACCIDENT - the same command also asks a question the old
+      # gate refuses on sight, and the new gate answers it instead. repos was already
+      # locked, so it is unaffected; these two were the only estate roots the operator
+      # seat could still write. A kernel lock catches every shape, including ones nobody
+      # has found, which a parser cannot promise. Operator scanned 786 of its own tool
+      # files: none writes into either root, so the lock breaks nothing it runs. JL chose
+      # lock-then-swap, so the gate swap waits on this landing.
+      #
+      # NOT INCLUDED: /home/skirmitch/closure-worktrees (8.2 GiB, 24 entries). The
+      # ruling names the Builder's folder and his build worktrees; closure-worktrees is
+      # where the operator's OWN mutant lane clones from, so locking it would likely
+      # break the requester. Raised with Operator rather than assumed either way.
+      readOnlyPaths = [
+        "/home/skirmitch/lonchera/repos"
+        "/home/skirmitch/cycle-hq/Builder"
+        "/home/skirmitch/lonchera/worktrees"
+      ];
     };
     builder = {
       folder = "cycle-hq/Builder";
