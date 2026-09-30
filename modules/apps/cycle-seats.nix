@@ -913,6 +913,56 @@ relaunched with: seat $seat"
   # per-seat MemoryMax figures still sum to less than the parent's - because exceeding it
   # is silent, and its consequence (the parent OOM picking a victim from the OTHER seat)
   # looks like an unrelated crash in someone else's session.
+  # THE ONE ASSERTION THAT MAKES THE RELAYOUT SAFE, EXTRACTED SO IT CAN BE GRADED AS
+  # SHIPPED. Builder graded it on a HARNESS COPY of the quota service, because that
+  # service has no test seam - ROOT and J are fixed and it chowns /mnt/scratch as root -
+  # so his copy had to change five preconditions. A copy that changed five preconditions
+  # is weaker evidence than the artifact, and removing exactly that weakness is what this
+  # whole effort has been for.
+  #
+  # He offered to take a test seam instead. I am not adding one: it would put test-mode
+  # branches inside a ROOT service that creates subvolumes and chowns the scratch root,
+  # and every branch is another way for the privileged path to be wrong. Extracting the
+  # assertion is strictly better - the service calls this, Builder calls this, and the
+  # thing graded is byte-identical to the thing that ships. No seam, no copy, no
+  # preconditions to change.
+  assertPlainDir = pkgs.writeShellApplication {
+    name = "cycle-assert-plain-dir";
+    runtimeInputs = [ pkgs.coreutils ];
+    text = ''
+      # usage: cycle-assert-plain-dir <path> [<seat>] [<wall>]
+      # exit 0 = a plain directory | 1 = a subvolume | 2 = cannot tell
+      #
+      # A seat's TMPDIR sits one level inside its quota'd subvolume. If that directory
+      # were ever itself a subvolume it would carry its OWN qgroup with no limit, so
+      # every byte the seat writes would leave its wall - while the SessionStart hook,
+      # which reads the qgroup of the subvolume BESIDE it, went on reporting a healthy
+      # "quota 0.9/20 GiB". An instrument reporting health while the bound is gone is
+      # strictly worse than not moving TMPDIR at all, so the quota service asserts this
+      # on every run rather than trusting it.
+      #
+      # Inode 256 is what makes a path a subvolume root on btrfs - the same fact the
+      # sibling check uses in the other direction, where 256 is the REQUIREMENT.
+      d="''${1:?usage: cycle-assert-plain-dir <path> [seat] [wall]}"
+      n="''${2:-the seat}"
+      q="''${3:-its}"
+      ino=$(stat -c %i "$d" 2>/dev/null) || ino=""
+      if [ -z "$ino" ]; then
+        echo "FAIL $n: could not stat $d to prove it is not a subvolume" >&2
+        exit 2
+      fi
+      if [ "$ino" = "256" ]; then
+        echo "FAIL $n: $d is a SUBVOLUME (inode 256), not a plain directory." >&2
+        echo "     It would carry its own unlimited qgroup, so everything the seat" >&2
+        echo "     writes would escape the $q wall while the hook still reported it" >&2
+        echo "     healthy from the subvolume beside it. Fix: stop the seat, move its" >&2
+        echo "     contents out, btrfs subvolume delete $d, then rerun" >&2
+        echo "     cycle-scratch-quota.service." >&2
+        exit 1
+      fi
+    '';
+  };
+
   limitsTool = pkgs.writeShellApplication {
     name = "cycle-limits";
     runtimeInputs = [ pkgs.systemd pkgs.coreutils pkgs.jq ];
@@ -1055,7 +1105,7 @@ in
     # Claude Code harness injects, so a sandboxed run from a plain shell or a timer has
     # none. It is unprivileged; userns and overlayfs already work here without it being
     # system-installed.
-    environment.systemPackages = [ seatLauncher sweeper limitsTool pkgs.bubblewrap ];
+    environment.systemPackages = [ seatLauncher sweeper limitsTool assertPlainDir pkgs.bubblewrap ];
 
     # C7-H1: NIX APPLIES THE QUOTA. Until now it did not, and nobody noticed because the
     # limits were already there - set by hand with root on 2026-09-26. So "adding a seat
@@ -1081,7 +1131,7 @@ in
       # claiming a check the code never makes; found while raising operator to 64G, which
       # would have been the first instance of it.
       restartTriggers = [ seatsJson ];
-      path = [ pkgs.btrfs-progs pkgs.coreutils pkgs.jq pkgs.util-linux ];
+      path = [ pkgs.btrfs-progs pkgs.coreutils pkgs.jq pkgs.util-linux assertPlainDir ];
       script = ''
         set -uo pipefail
         ROOT="${cfg.scratchRoot}"
@@ -1089,7 +1139,7 @@ in
 
         # PREFLIGHT. This service creates subvolumes and sets limits, so a missing tool
         # must stop it rather than silently change what it does. See the awk incident.
-        for t in btrfs jq mountpoint findmnt stat chown chmod; do
+        for t in btrfs jq mountpoint findmnt stat chown chmod cycle-assert-plain-dir; do
           command -v "$t" >/dev/null 2>&1 || { echo "REFUSE: $t is not on PATH"; exit 1; }
         done
 
@@ -1172,18 +1222,9 @@ in
               chmod 700 "$tpth"
               echo "created $tpth"
             fi
-            tino=$(stat -c %i "$tpth" 2>/dev/null) || tino=""
-            if [ "$tino" = "256" ]; then
-              echo "FAIL $n: $tpth is a SUBVOLUME (inode 256), not a plain directory."
-              echo "     It would carry its own unlimited qgroup, so everything the seat"
-              echo "     writes would escape the $q wall while the hook still reported it"
-              echo "     healthy from the subvolume beside it. Fix: stop the seat, move its"
-              echo "     contents out, btrfs subvolume delete $tpth, then rerun this unit."
-              rc=1; continue
-            elif [ -z "$tino" ]; then
-              echo "FAIL $n: could not stat $tpth to prove it is not a subvolume"
-              rc=1; continue
-            fi
+            # Extracted to cycle-assert-plain-dir so the bytes Builder grades are the
+            # bytes that run here. It writes its own FAIL text to stderr.
+            cycle-assert-plain-dir "$tpth" "$n" "$q" || { rc=1; continue; }
           fi
 
           # Inode 256 is what makes a path a subvolume ROOT. A qgroup limit on a plain
