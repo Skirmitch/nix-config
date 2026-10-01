@@ -729,8 +729,25 @@ relaunched with: seat $seat"
           else
             echo "        referenced: UNKNOWN - btrfs/findmnt unavailable. The escape stands."
           fi
-          echo "        Remove with: rm -rf $sv  (measured: works as the owning user,"
-          echo "        non-empty included - no root needed.)"
+          # ASK FIRST. The old line was a bare "Remove with: rm -rf", and a seat DOES
+          # keep empty subvolumes here on purpose: the Builder's acceptance harnesses
+          # keep keep-nolimit-subvol and keep-relayout-b/tmp, made once and reused,
+          # because a subvolume's qgroup is not the owner's to destroy and one made per
+          # run would leave a stale qgroup per run. An hourly report telling the reader
+          # to delete them is advice that costs exactly what the fixtures exist to avoid.
+          #
+          # Builder's design, and better than the one I proposed: ONE text, no branch.
+          # I wanted to suppress the removal line below a size floor, but the floor is
+          # approximate - 16384 is "at most one metadata node", and files under ~2048 B
+          # are stored inline, so a subvolume with a few tiny files reads the floor too.
+          # Changing what a row says on an approximate property only buys something if
+          # the advice itself has to stay. It does not. So the advice is corrected for
+          # every case and nothing is judged by size or by path.
+          echo "        BEFORE REMOVING IT, ASK THE $seat SEAT. A seat may keep an empty"
+          echo "        subvolume here deliberately as a test fixture, and removing one"
+          echo "        leaves its qgroup behind - the cost such fixtures exist to avoid."
+          echo "        Then: rm -rf $sv  (measured: works as the owning user, non-empty"
+          echo "        included - no root needed.)"
         done < "$SCAN_OUT"
         rm -f "$SCAN_OUT"
       done
