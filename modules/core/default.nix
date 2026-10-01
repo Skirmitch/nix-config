@@ -50,6 +50,44 @@ let
       echo "originals untouched; repaired files are *.fixed.avi"
     '';
   };
+
+  # --- ltrace: its TEST FIXTURE will not compile under C++20 ----------------
+  #
+  # GCC 16 defaults to C++20, where ltrace's own fixture `volatile int Fv_Vi(void)`
+  # draws -Wvolatile ("'volatile'-qualified return type is deprecated"). ltrace's
+  # dejagnu harness counts ANY compiler output as a failed compile, so the demangle
+  # test program is never built and all 15 demangle.exp cases FAIL. That failed the
+  # whole toplevel, because ltrace is in systemPackages below and therefore in
+  # system-path - which is how a single leaf package blocked `nix flake update`.
+  #
+  # THE BINARY IS NOT AFFECTED, and that was established before this was written
+  # rather than assumed. On 2026-10-01: the new ltrace traces and demangles
+  # identically to generation 265's across {old,new} x {gcc-15 probe, gcc-16 probe}
+  # x {-C, raw}, every demangled name matches binutils c++filt, and its embedded
+  # __cxa_demangle agrees with the old one on 85,789 real mangled names. With only
+  # the fixture's compile fixed the suite gives 244 pass / 0 fail / 1 unsupported -
+  # the old baseline exactly.
+  #
+  # SO THIS IS NOT `doCheck = false`. That would also work, and would throw away a
+  # 244-test regression gate for every future bump. Patch the fixture's compile
+  # flags and keep every test running instead.
+  #
+  # THE LAST LINE IS A TRIPWIRE, not a sanity check. If upstream ever edits
+  # demangle.exp the sed stops matching, the count fails, and the build breaks
+  # LOUDLY - so this overlay is removed rather than quietly outliving its reason.
+  # The accepted cost: `dif` goes red again at that moment. That is the point.
+  # Upstream had no fix as of 2026-10-01 (nixpkgs' last ltrace commit: 2026-01-01).
+  ltraceCxx20FixtureOverlay = _final: prev: {
+    ltrace = prev.ltrace.overrideAttrs (old: {
+      postPatch = (old.postPatch or "") + ''
+        sed -i \
+          -e 's/\[list debug c++\]/[list debug c++ additional_flags=-Wno-volatile]/' \
+          -e 's/\[list debug shlib=\$lib_sl c++\]/[list debug shlib=\$lib_sl c++ additional_flags=-Wno-volatile]/' \
+          testsuite/ltrace.minor/demangle.exp
+        test "$(grep -c 'Wno-volatile' testsuite/ltrace.minor/demangle.exp)" -eq 2
+      '';
+    });
+  };
 in
 {
   imports = [ ./locale.nix ];
@@ -57,6 +95,7 @@ in
   # --- NIX SETTINGS ---
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
   nixpkgs.config.allowUnfree = true;
+  nixpkgs.overlays = [ ltraceCxx20FixtureOverlay ];
 
   # Hard-link identical files in the store. Measured 2026-09-25: 12.7 GiB of
   # duplicates had accumulated and /nix/store/.links was empty, because this
