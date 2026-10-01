@@ -262,8 +262,37 @@ let
         say "     subvolume instead. A fixture table predating the relayout does this."
         tmp="$scratch"
       fi
-      case "''${TMPDIR:-}" in "$tmp"*) ;; *)
-        say "FAIL TMPDIR=''${TMPDIR:-<unset>} is not under $tmp - the quota does not cover it"; bad=1 ;;
+      # THREE CASES, NOT TWO, because "not at the declared tmp" and "outside the bound"
+      # are different facts and the old single message asserted the wrong one.
+      #
+      # Found 2026-09-30 on the live box, in the window every seat passes through after
+      # the table moves and before it relaunches. Builder's session had
+      # TMPDIR=/mnt/scratch/builder against a table declaring /mnt/scratch/builder/tmp,
+      # and the hook said "the quota does not cover it". That is FALSE:
+      # /mnt/scratch/builder IS the quota'd subvolume, rootid 259, max_referenced
+      # 21474836480. The wall covered every byte he wrote. What was missing was the one
+      # level that keeps a stray $TMPDIR/.. counted - a real degradation, but not that one.
+      #
+      # Both remain FAIL: a session launched before the relayout genuinely lacks the
+      # protection the relayout exists to give. Only the reason and the remedy differ, and
+      # the remedy is the actionable part - "relaunch" rather than "your scratch is
+      # unbounded", which would send someone hunting a bound that is already there.
+      #
+      # The patterns are anchored now ("$tmp" or "$tmp"/*) rather than the old prefix
+      # glob, which also matched a sibling like <scratch>/tmpfoo. Builder made the same
+      # point one level up: a prefix test passes for $scratch/anything, which is weaker
+      # than the thing being asserted.
+      case "''${TMPDIR:-}" in
+        "$tmp"|"$tmp"/*) ;;
+        "$scratch"|"$scratch"/*)
+          say "FAIL TMPDIR=''${TMPDIR:-<unset>} is inside the quota'd subvolume but not at"
+          say "     $tmp, so this session PREDATES the TMPDIR relayout. The wall DOES"
+          say "     cover it; what is missing is the level that keeps a stray \$TMPDIR/.."
+          say "     counted. Relaunch with:  seat $seat"
+          bad=1 ;;
+        *)
+          say "FAIL TMPDIR=''${TMPDIR:-<unset>} is not under $tmp - the quota does not cover it"
+          bad=1 ;;
       esac
 
       # C7-H1: VERIFY THE QUOTA, DO NOT CLAIM IT.
