@@ -108,15 +108,15 @@ in {
   # ship path reads it, so a red unit cannot interrupt a push, and it belongs where a
   # human sees it.
   systemd.services.cycle-pg-collation-check = {
-    description = "Report PostgreSQL collation versions that no longer match glibc";
+    description = "Report PostgreSQL collation versions that no longer match the OS";
     after = [ "postgresql.service" ];
     requires = [ "postgresql.service" ];
     wantedBy = [ "multi-user.target" ];
     path = [ config.services.postgresql.package pkgs.coreutils ];
     # RE-RUN EXACTLY WHEN IT MATTERS. The trigger is glibc's own store path, so a
     # rebuild that moves glibc re-runs this one and a rebuild that does not, does not.
-    # Without it a oneshot only re-runs when its own text changes, which is never the
-    # thing that breaks collation.
+    # NOTE it does NOT catch an ICU-only move: ICU is a separate dependency and its
+    # version drifted independently (below). A boot run covers that.
     restartTriggers = [ "${pkgs.glibc}" ];
     serviceConfig = {
       Type = "oneshot";
@@ -134,65 +134,113 @@ in {
           and datcollversion <> pg_database_collation_actual_version(oid)
         order by datname") || { echo "REFUSE: could not query pg_database"; exit 2; }
 
-      # COULD NOT LOOK IS NOT HEALTHY, and a run must PRINT ITS DENOMINATOR (both at
-      # Operator's ask). The first draft of this loop ended `|| continue`, which skips a
-      # database it cannot read and then reports success - a guard that refuses in
-      # silence. It now counts what it read, what it skipped and why, prints those on
-      # every run, and exits 3 rather than 0 when anything was unreadable.
       dbs_total=$(psql -tAq -d postgres -c "select count(*) from pg_database") || dbs_total=""
-      dbs_versioned=$(psql -tAq -d postgres -c \
-        "select count(*) from pg_database where datcollversion is not null") || dbs_versioned=""
       dbs_noversion=$(psql -tAq -d postgres -c \
         "select string_agg(datname, ', ') from pg_database where datcollversion is null") || dbs_noversion=""
 
-      # The second comparison. Per database, because pg_collation is per database.
-      collbad=""; read_ok=0; rows_read=0; unread=""
-      for db in $(psql -tAq -d postgres -c \
-          "select datname from pg_database where datallowconn order by datname"); do
-        n=$(psql -tAq -d "$db" -c \
-          "select count(*) from pg_collation
-           where collprovider='c' and collversion is not null
-             and collversion <> pg_collation_actual_version(oid)" 2>/dev/null)
-        rc=$?
-        if [ "$rc" != 0 ] || [ -z "$n" ]; then
-          unread="$unread  $db  (could not read its pg_collation, psql rc=$rc)
+      # A STALE COLLATION MATTERS IFF SOMETHING REFERENCES IT, which is PostgreSQL's own
+      # rule - it warns about a collation only where that collation is used. Builder
+      # measured 2026-10-02 that 871 ICU rows per database are stale (es-x-icu
+      # 153.128.46 against 153.136.48) while my first predicate filtered collprovider
+      # 'c' and saw none of them. Both answers were wrong to ship: filtering to libc
+      # lies about the unit, and failing on 871 unreferenced rows in 69 databases is
+      # ~60k lines of noise for something PostgreSQL itself does not consider a problem.
+      # So: FAIL on stale-and-referenced, REPORT stale-and-unreferenced as context so
+      # the drift stays visible instead of hidden. Today that is 871 and 0 - and the
+      # moment anyone adds an es-x-icu column it becomes a failure.
+      #
+      # The 36 index entries that carry a non-default collation are all plain C, which
+      # has no version and cannot go stale. Measured, not assumed.
+      #
+      # ITERATE DATABASES WITH A RECORDED VERSION, NOT `datallowconn`. The first draft
+      # looped over connectable databases, so a non-connectable one carrying a recorded
+      # version was skipped in silence - it appeared in the arm above and its collations
+      # were never read, and the run still passed. Builder named the plant that produces
+      # it: ALTER DATABASE x ALLOW_CONNECTIONS false, which refuses even a superuser.
+      # template0 is exempt because it records NO version, never because it refuses
+      # connections; that is the correct discriminator and the reason it is safe.
+      # WORD-SPLITTING AND GLOBBING, found by Operator in the shipped bytes. The loop was
+      # `for db in $(psql ...)`, unquoted, with no IFS or `set -f` anywhere in the file.
+      # A database named `collcheck arm4` then reads as two names that do not exist, and
+      # one containing `*` expands against the cwd - so the check would name the wrong
+      # things and never read the real database, while still reporting on it. Read the
+      # list a line at a time instead. Process substitution, NOT a pipe: a pipe puts the
+      # loop in a subshell and `unread` and `read_ok` would be lost at `done`, which is
+      # the same could-not-look silence by another route.
+      collbad=""; read_ok=0; stale_unused_max=0; unread=""
+      while IFS= read -r db; do
+        [ -n "$db" ] || continue
+        # ERREXIT IS INJECTED ABOVE THIS SCRIPT by the NixOS service wrapper, so the
+        # `set -uo pipefail` above is cosmetics on that point. An UNGUARDED failing
+        # assignment exits here and never reaches `rc=$?` - which made the whole
+        # could-not-look branch below UNREACHABLE. It shipped that way and was only
+        # found because Operator asked for every arm to be proven red: the probe died
+        # with psql's exit 2 instead of the check's exit 3. Hence `|| rc=$?`, which
+        # makes the compound succeed so errexit stays out of it. Same trap as
+        # writeShellApplication in cycle-seats.nix.
+        rc=0
+        row=$(psql -tAq -F'|' -d "$db" -c "
+          with stale as (
+            select oid, collname from pg_collation
+            where collversion is not null
+              and collversion <> pg_collation_actual_version(oid)
+          ), used as (
+            select a.attcollation as oid from pg_attribute a
+              join pg_class c on c.oid = a.attrelid
+              join pg_namespace n on n.oid = c.relnamespace
+             where a.attcollation <> 0
+               and n.nspname not in ('pg_catalog','information_schema')
+            union select ic from pg_index i, unnest(i.indcollation) ic where ic <> 0
+            union select typcollation from pg_type where typcollation <> 0
+          )
+          select count(*) filter (where oid in (select oid from used)),
+                 count(*),
+                 string_agg(distinct collname, ', ')
+                   filter (where oid in (select oid from used))
+          from stale" 2>/dev/null) || rc=$?
+        if [ "$rc" != 0 ] || [ -z "$row" ]; then
+          unread="$unread  $db  (records a version but its pg_collation could not be read, psql rc=$rc)
 "
           continue
         fi
         read_ok=$((read_ok + 1))
-        tot=$(psql -tAq -d "$db" -c \
-          "select count(*) from pg_collation where collprovider='c' and collversion is not null" 2>/dev/null) || tot=0
-        rows_read=$((rows_read + tot))
-        if [ "$n" != 0 ]; then
-          collbad="$collbad  $db  $n stale collation row(s)
+        used_stale=''${row%%|*}; rest=''${row#*|}
+        tot_stale=''${rest%%|*}; names=''${rest#*|}
+        [ "$tot_stale" -gt "$stale_unused_max" ] && stale_unused_max=$tot_stale
+        if [ "$used_stale" != 0 ]; then
+          collbad="$collbad  $db  $used_stale stale collation(s) IN USE: $names
 "
         fi
-      done
+      done < <(psql -tAq -d postgres -c \
+        "select datname from pg_database where datcollversion is not null order by datname")
 
-      # THE DENOMINATOR, on every run, pass or fail. A run that read nothing must not be
+      # THE DENOMINATOR, every run, pass or fail. A run that read nothing must not be
       # indistinguishable from a run that found nothing.
-      echo "read: $dbs_versioned of $dbs_total databases carry a recorded version;"
-      echo "      $rows_read collation rows across $read_ok connectable databases."
+      echo "read: $read_ok of $dbs_total databases carry a recorded collation version."
       [ -n "$dbs_noversion" ] && echo "      no recorded version, by design: $dbs_noversion"
+      echo "      all providers judged (libc, ICU, builtin), not libc alone."
+      echo "      worst case stale-but-UNREFERENCED collations in one database: $stale_unused_max"
+      echo "      (unreferenced stale collations are not a fault - PostgreSQL warns only on use;"
+      echo "       today these are the ICU set, which no column or index key references)"
       [ -n "$unread" ] && { echo "      UNREADABLE:"; printf '%s' "$unread"; }
 
-      if [ -z "$dbs_versioned" ] || [ "$dbs_versioned" = 0 ] || [ "$read_ok" = 0 ]; then
+      if [ "$read_ok" = 0 ]; then
         echo "REFUSE: read nothing to judge. That is not a pass."
         exit 3
       fi
       if [ -n "$unread" ]; then
-        echo "REFUSE: some databases could not be read, so this run cannot clear them."
+        echo "REFUSE: a database carrying a recorded version could not be read, so this run cannot clear it."
         exit 3
       fi
 
       if [ -z "$dbbad" ] && [ -z "$collbad" ]; then
-        echo "collation versions match glibc in every database read above."
+        echo "collation versions match the OS in every database read above."
         exit 0
       fi
 
-      echo "COLLATION VERSION MISMATCH. glibc moved and these databases still record the old one."
+      echo "COLLATION VERSION MISMATCH."
       [ -n "$dbbad" ] && { echo; echo "database-level:"; printf '%s\n' "$dbbad" | sed 's/^/  /'; }
-      [ -n "$collbad" ] && { echo; echo "stale pg_collation rows (a REFRESH of the database does NOT fix these):"; printf '%s' "$collbad"; }
+      [ -n "$collbad" ] && { echo; echo "stale collations THAT ARE IN USE (a database-level REFRESH does NOT fix these):"; printf '%s' "$collbad"; }
       cat <<'EOT'
 
 REMEDY, IN THIS ORDER. Reversing it hides index corruption instead of fixing it:
@@ -200,7 +248,7 @@ REMEDY, IN THIS ORDER. Reversing it hides index corruption instead of fixing it:
   psql -U postgres -d <db> -c 'REINDEX DATABASE "<db>";'
   psql -U postgres -d <db> -c 'DO $$ DECLARE c record; BEGIN
       FOR c IN SELECT oid::regcollation AS cn FROM pg_collation
-               WHERE collprovider = 'c' AND collversion IS NOT NULL
+               WHERE collversion IS NOT NULL
                  AND collversion <> pg_collation_actual_version(oid)
       LOOP EXECUTE format('ALTER COLLATION %s REFRESH VERSION', c.cn); END LOOP;
     END $$;'
