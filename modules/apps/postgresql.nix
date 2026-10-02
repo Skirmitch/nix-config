@@ -213,7 +213,12 @@ in {
   };
 
   # Client tools (psql, pg_dump, …) on PATH for everyone.
-  environment.systemPackages = [ pkgs.postgresql_17 ];
+  # The check is on PATH because its own remedy text tells a HUMAN to run REINDEX and
+  # REFRESH - so that human needs to re-run the check afterwards to see their fix took,
+  # without `systemctl start` plus a journal read. (I claimed earlier it was already on
+  # PATH; that was a `readlink -f` artifact - readlink resolves a path whether or not it
+  # exists, so the check "passed" against a file that was not there.)
+  environment.systemPackages = [ pkgs.postgresql_17 collationCheck ];
 
   # --- DROP LEFTOVER PYTEST DATABASES ---
   #
