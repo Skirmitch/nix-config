@@ -22,8 +22,14 @@ in
   };
 
   # Sideloading and OpenXR tooling.
+  #
+  # sidequest was dropped 2026-10-05. nixpkgs still packages 0.10.42, whose
+  # upstream release is 2024-05-02 (upstream itself is at 1.3.1), and the
+  # 2026-10-03 nixpkgs marked it insecure for EOL Electron 29 - which refuses
+  # evaluation of the WHOLE system, not just that package. Sideloading rides
+  # on android-tools below (`adb install`). If it is ever wanted back, take
+  # upstream's own AppImage; do not allow nixpkgs' 2024 build.
   environment.systemPackages = with pkgs; [
-    sidequest        # Quest sideloading / file management
     android-tools    # adb + fastboot
     openxr-loader    # system OpenXR loader
     xrizer           # OpenVR -> OpenXR translator for WiVRn (maintained)
@@ -36,7 +42,7 @@ in
 
   # Explicit USB access for Meta/Oculus devices (vendor ID 2833 = Quest 3).
   # systemd 258's generic uaccess rule matches by interface class, so this is
-  # belt-and-suspenders for adb / SideQuest device access.
+  # belt-and-suspenders for adb device access.
   services.udev.extraRules = ''
     SUBSYSTEM=="usb", ATTR{idVendor}=="2833", MODE="0660", TAG+="uaccess"
   '';
