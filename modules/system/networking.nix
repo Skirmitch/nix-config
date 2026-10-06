@@ -4,6 +4,23 @@
   networking.networkmanager.enable = true;
   networking.firewall.trustedInterfaces = [ "wlp12s0u1i3" ];
 
+  # OpenVPN, system-wide and surviving reboots. Two pieces are needed and
+  # neither does the job alone:
+  #  * the NetworkManager plugin below, without which GNOME's
+  #    Settings -> Network -> VPN -> "Import from file..." silently refuses
+  #    every .ovpn. The plugin dir /run/current-system/sw/lib/NetworkManager/VPN
+  #    was EMPTY before this (checked 2026-10-06), so there was no import path
+  #    at all, with no error explaining why.
+  #  * the `openvpn` CLI in systemPackages below, for running a .ovpn by hand
+  #    or under a unit, independently of the desktop.
+  # An imported connection is written to /etc/NetworkManager/system-connections,
+  # which impermanence already persists (hosts/diana/impermanence.nix:119), so
+  # importing once is enough and it comes back after every reboot.
+  # Deliberately NO services.openvpn.servers.*: an always-on tunnel needs a
+  # specific config plus credentials, and would start routing traffic unasked.
+  # Add one here only when a given .ovpn is meant to be up at boot.
+  networking.networkmanager.plugins = [ pkgs.networkmanager-openvpn ];
+
   # Wireless regulatory domain. The kernel boots with "00" (world), which
   # bans transmitting on 5 GHz, so a 5 GHz AP/hotspot cannot start. Pinned
   # to CL (Chile) to match this host's locale and timezone.
@@ -42,7 +59,7 @@
   services.udev.extraRules = ''
   ACTION=="add", SUBSYSTEM=="bluetooth", TEST=="power/control", ATTR{power/control}="on"
   '';
-  environment.systemPackages = [ pkgs.dnsutils pkgs.iw ];  # wgnord: see nordvpn.nix
+  environment.systemPackages = [ pkgs.dnsutils pkgs.iw pkgs.openvpn ];  # wgnord: see nordvpn.nix
   services.tlp.enable = false;  # just in case
   systemd.tmpfiles.rules = [
     "w /sys/module/bluetooth/parameters/disable_ertm - - - - 1"
