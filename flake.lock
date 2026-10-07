@@ -28,11 +28,11 @@
         "systems": "systems"
       },
       "locked": {
-        "lastModified": 1791259350,
-        "narHash": "sha256-zFzAgJWwGylQEnlX3wC/j2sVjMRCVnYNn8ogLDF7JGc=",
+        "lastModified": 1791313301,
+        "narHash": "sha256-6wQM1lQAb3q0hVIZ48KsrFlLGwu6W2HCmLDqnoyqvvU=",
         "owner": "sadjow",
         "repo": "claude-code-nix",
-        "rev": "05717477d9464707396b6387ae401175450173d6",
+        "rev": "13f3032e7a46582bbd3ed749e25817c7ac584b77",
         "type": "github"
       },
       "original": {
@@ -47,11 +47,11 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1791167926,
-        "narHash": "sha256-k8fFhBXvZ0aJSRsQNAO5bxwkGhaI4jI1w8sB4L986YM=",
+        "lastModified": 1791339629,
+        "narHash": "sha256-IAjn7KyOA6dQwL6zTpMYy2jmHqHMKQFTHbkb0MSub3I=",
         "owner": "aaddrick",
         "repo": "claude-desktop-debian",
-        "rev": "972d67ac01dfd5c7f957ddbf3893345e47212d7d",
+        "rev": "80d51ac95362eb38173693a115db925a3125a739",
         "type": "github"
       },
       "original": {
@@ -101,8 +101,8 @@
         ]
       },
       "locked": {
-        "lastModified": 1791367361,
-        "narHash": "sha256-ejVB+hFf55x4VU7p9o4VFHGWsrgkYw5WO4jdxooK5+c=",
+        "lastModified": 1791373523,
+        "narHash": "sha256-kjouTYdf+LQMLyZElYyaZv0xVX3ToodnYLnxJOs2EFI=",
         "path": "/home/skirmitch/Projects/hc-sync",
         "type": "path"
       },
@@ -118,11 +118,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791227480,
-        "narHash": "sha256-+lrD+sxc2RKUWXRBAcggn7uBCFeJgnV75jD/cz7gJRA=",
+        "lastModified": 1791306979,
+        "narHash": "sha256-KuLePuhwJM9NLt/gTLHzXaOoSZKGoB3m7NfXjiQ98HY=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "aa23f720d022187228bc264f759aef6b80233bcf",
+        "rev": "fae6e9e42c3b762ab47635cddcfaf6f52374a61b",
         "type": "github"
       },
       "original": {
