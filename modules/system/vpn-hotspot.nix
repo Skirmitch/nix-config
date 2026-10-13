@@ -17,6 +17,12 @@ let
   vpn-hotspot = pkgs.writeShellApplication {
     name = "vpn-hotspot";
     runtimeInputs = with pkgs; [
+      # MUST be the overlaid wgnord from modules/system/nordvpn.nix, which is
+      # what `pkgs.wgnord` resolves to. Upstream's build renders a 215-byte
+      # template with no hooks and AllowedIPs = 0.0.0.0/0, ::/0, which routes
+      # both Tailscale resolvers into the tunnel and kills DNS for as long as
+      # the hotspot is up (diagnosed 2026-10-10 - see nordvpn.nix). Do not
+      # replace this with a standalone wgnord.
       wgnord
       networkmanager
       iptables

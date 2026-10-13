@@ -22,6 +22,18 @@
 #  * NordLynx carries no IPv6. Rather than routing ::/0 into a black hole,
 #    IPv6 is made explicitly unreachable while connected (metric 1 beats the
 #    RA default at 100), so resolvers sort IPv4 first and nothing leaks.
+#
+# Why this is an OVERLAY and not a let-bound package (2026-10-10):
+# shipping the patched build in systemPackages alone fixed `nordconnect` and
+# left every other caller on upstream's hookless template. vpn-hotspot.nix
+# listed plain `pkgs.wgnord` in runtimeInputs, writeShellApplication prepends
+# those to PATH, so `vpn-hotspot up` ran the 215-byte config: no rule at 5207,
+# no accept-dns=false, and AllowedIPs = 0.0.0.0/0, ::/0. /etc/resolv.conf holds
+# only Tailscale's resolvers, so BOTH were swallowed - 100.100.100.100 by the
+# IPv4 catch-all and fd7a:115c:a1e0::53 by ::/0 into a tunnel with no IPv6 -
+# giving the same signature as 09-11 and 09-24: tunnel healthy, DNS dead, for
+# as long as the hotspot was up. An overlay makes pkgs.wgnord the hooked build
+# for every consumer, so the next module to want it cannot get this wrong.
 
 let
   template = pkgs.writeText "wgnord-template.conf" ''
@@ -65,15 +77,19 @@ let
   # instead. --replace-fail is the trip wire: if nixpkgs ever stops pointing at
   # $unresholved/share/template.conf, this fails the build rather than silently
   # handing the tunnel a hookless config again.
-  wgnord = pkgs.wgnord.overrideAttrs (old: {
-    postFixup = (old.postFixup or "") + ''
-      substituteInPlace $out/bin/wgnord \
-        --replace-fail "${pkgs.wgnord.unresholved}/share/template.conf" "${template}"
-    '';
-  });
+  wgnordTemplateOverlay = final: prev: {
+    wgnord = prev.wgnord.overrideAttrs (old: {
+      postFixup = (old.postFixup or "") + ''
+        substituteInPlace $out/bin/wgnord \
+          --replace-fail "${prev.wgnord.unresholved}/share/template.conf" "${template}"
+      '';
+    });
+  };
 in
 {
-  environment.systemPackages = [ wgnord ];
+  nixpkgs.overlays = [ wgnordTemplateOverlay ];
+
+  environment.systemPackages = [ pkgs.wgnord ];
 
   systemd.tmpfiles.rules = [
     # Kept for the day upstream honours $conf_dir again: harmless while inert,
