@@ -84,6 +84,12 @@ in
     vscode
     awscli2
     ssm-session-manager-plugin
+    google-cloud-sdk   # gcloud/gsutil: the GCP counterpart to awscli2. Added
+                       # because an OAuth policy mail about project
+                       # trim-karma-371 could not be checked from Diana at all
+                       # — no gcloud, so no way to list projects or clients
+                       # (2026-10-12). Console access is not a substitute when
+                       # the question is "which clients does this account own".
     nodejs
     jetbrains.rust-rover
     sqlite

@@ -59,7 +59,13 @@
   services.udev.extraRules = ''
   ACTION=="add", SUBSYSTEM=="bluetooth", TEST=="power/control", ATTR{power/control}="on"
   '';
-  environment.systemPackages = [ pkgs.dnsutils pkgs.iw pkgs.openvpn ];  # wgnord: see nordvpn.nix
+  # wireguard-tools is here for `wg`, the only way to see whether a wgnord
+  # tunnel is actually carrying traffic: handshake age, rx/tx, and the peer's
+  # allowed IPs. Without it `wg show` simply fails, and a diagnostic that
+  # swallows the error reports a healthy tunnel as dead — which happened on
+  # 2026-10-10, where `handshake=none rx=0 tx=0` came from an ABSENT binary
+  # while the tunnel was fine and the real fault was DNS (see nordvpn.nix).
+  environment.systemPackages = [ pkgs.dnsutils pkgs.iw pkgs.openvpn pkgs.wireguard-tools ];  # wgnord: see nordvpn.nix
   services.tlp.enable = false;  # just in case
   systemd.tmpfiles.rules = [
     "w /sys/module/bluetooth/parameters/disable_ertm - - - - 1"
