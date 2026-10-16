@@ -36,6 +36,7 @@
     ../../modules/apps/zerene-stacker.nix
     ../../modules/apps/g9cam.nix
     ../../modules/apps/health-store.nix
+    ../../modules/apps/transcript-archive.nix
   ];
 
   # --- CYCLE-HQ SEATS ---
