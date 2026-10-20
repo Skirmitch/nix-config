@@ -13,6 +13,19 @@ let
   #                  Carries the boost-1.91 patch from freecad.nix's overlay.
   #   reportlab    — programmatic PDF (cuadros de superficies, anexos) when typst
   #                  is overkill.
+  #
+  # The block below is ALSO the machine's general-purpose python3, which is why
+  # it carries packages with nothing to do with CAD:
+  #   jsonschema, pyyaml   - hard deps of the midpowerroles research seat
+  #   requests, bs4, lxml  - source re-fetching for that same pipeline
+  #
+  # THIS MUST REMAIN THE ONLY python3.withPackages ON JL's PATH. Measured
+  # 2026-10-20: /etc/profiles/per-user/skirmitch/bin (home-manager) sits at PATH
+  # position 9 and /run/current-system/sw/bin at 11, so a SECOND env added
+  # "account-wide" in home-manager silently SHADOWS this one and strips ezdxf,
+  # shapely and ifcopenshell out of `python3` -- the architect tooling breaks
+  # with no error anywhere near the change that caused it. Add packages HERE.
+  #
   # hiPrio so this env's bin/python3 wins over the plain python3 that other
   # modules put on the system PATH (it is a strict superset).
   arqPython = lib.hiPrio (pkgs.python3.withPackages (ps: with ps; [
@@ -22,6 +35,12 @@ let
     numpy
     ifcopenshell
     reportlab
+    # --- not CAD: shared general-purpose deps, see the note above ---
+    jsonschema
+    pyyaml
+    requests
+    beautifulsoup4
+    lxml
   ]));
 in
 {

@@ -216,7 +216,7 @@ in
     Exec=boox
     Icon=boox
     Terminal=false
-    Categories=Utility;Graphics;
+    Categories=Utility;
     StartupWMClass=scrcpy
   '';
 }
