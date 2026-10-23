@@ -19,6 +19,35 @@
     # release-26.11 branch; main declares aaglReleaseBranch = "26.11", matching nixpkgs.
     aagl.url = "github:ezKEa/aagl-gtk-on-nix";
     aagl.inputs.nixpkgs.follows = "nixpkgs";
+
+    # aagl's overlay builds its three launchers with rust-bin from
+    # oxalica/rust-overlay, which aagl pins in its OWN lock at 2026-07-31 -
+    # thirteen days short of 892c035d ("treewide: stdenv.is* ->
+    # stdenv.hostPlatform.is*", 2026-08-13). That stale rev is why every eval of
+    # this system printed "stdenv.isLinux is deprecated" and the isDarwin twin,
+    # out of rust-overlay's lib/mk-aggregated.nix, for code we neither wrote nor
+    # import directly.
+    #
+    # A bare `nix flake update` can never clear it: recreating the lock honours
+    # each input flake's own lock for that flake's inputs, so rust-overlay stays
+    # exactly where aagl left it - and d82d6d6f is still the newest aagl commit
+    # as of 2026-10-23, so waiting it out is not a plan.
+    #
+    # Pinned to the fix commit itself rather than HEAD, and by rev so that
+    # `nix flake update` cannot move it. At 892c035d `rust-bin.stable.latest` is
+    # still Rust 1.97.1 and the commit only renames stdenv attributes, so the
+    # toolchain derivation comes out bit-identical: VERIFIED 2026-10-23 that
+    # system.build.toplevel.drvPath is unchanged and `nix-store --realise
+    # --dry-run` has nothing to build. Tracking HEAD instead costs 43
+    # derivations - a whole Rust 1.99.1 toolchain plus anime-game-launcher
+    # rebuilt from source, forfeiting the ezkea.cachix.org hit - and re-pays it
+    # every time stable Rust moves, for no benefit this config can observe.
+    #
+    # DELETE this input and the follows below once aagl bumps its own lock past
+    # 2026-08-13; the warnings are already fixed upstream.
+    rust-overlay.url = "github:oxalica/rust-overlay/892c035d7c2ff75acd5da10424a47ab454e1f3dc";
+    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    aagl.inputs.rust-overlay.follows = "rust-overlay";
     # UNPINNED 2026-07-05: back to tracking HEAD. The long pin saga is over —
     # upstream v3.0.0 (PR #763, 2026-07-04) rebased the package onto Anthropic's
     # OFFICIAL Linux .deb, so it no longer patches minified code and no longer

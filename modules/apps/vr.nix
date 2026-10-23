@@ -1,9 +1,19 @@
-{ pkgs, ... }:
+{ pkgs, lib, modulesPath, ... }:
 let
   # SteamVR's compositor launcher — lives in the user's Steam library, so it
   # is rewritten on every SteamVR update.
   steamvrLauncher =
     "/home/skirmitch/.local/share/Steam/steamapps/common/SteamVR/bin/linux64/vrcompositor-launcher";
+
+  # Tripwire for the avahi warning fix at the bottom of this file. `pathExists`
+  # guards an upstream rename: a bare `readFile` of a vanished path throws and
+  # takes the WHOLE eval down, which is a worse failure than the warning we are
+  # silencing. The infix is the obsolete option wivrn.nix still sets; one
+  # occurrence in nixpkgs 02c087f3fe.
+  wivrnModule = "${modulesPath}/services/video/wivrn.nix";
+  wivrnStillSetsObsoleteAvahiOptions =
+    builtins.pathExists wivrnModule
+    && lib.hasInfix "userServices = true;" (builtins.readFile wivrnModule);
 in
 {
   # --- VR / PCVR streaming (Meta Quest 3) ---
@@ -78,4 +88,46 @@ in
     wantedBy = [ "multi-user.target" ];
     pathConfig.PathModified = steamvrLauncher;
   };
+
+  # --- Silence the two avahi "obsolete option" warnings that services.wivrn
+  #     above drags in (4 of the 8 warning lines every `dif` printed) ---
+  #
+  # nixpkgs' own module, nixos/modules/services/video/wivrn.nix, sets
+  # `services.avahi.publish.{enable,userServices} = true`. Both were made
+  # obsolete in the avahi module, so every eval of this system printed an
+  # obsolescence notice for options we never wrote. Checked against nixpkgs
+  # master on 2026-10-23: still unfixed upstream, so it has to be absorbed here.
+  #
+  # The mechanism (avahi-daemon.nix:475-483): the warning fires on
+  # `cfg.publish.<x> != null`, so forcing them back to null removes it. mkForce
+  # is required - wivrn.nix sets them as plain definitions, not mkDefault. The
+  # same `!= null` guards the mkIf blocks that translated those options into
+  # `settings.publish.*` (:489-497), so we write those three settings ourselves:
+  # exactly the values the warning text prescribes, and exactly what the old
+  # options resolved to for enable = userServices = true. mkDefault keeps a
+  # future upstream fix from colliding with us.
+  #
+  # VERIFIED 2026-10-23, not reasoned: `services.avahi.settings` is identical
+  # before and after, avahi-daemon.conf stays the same store path
+  # (bky2j5pqycyk7rzpk6bfxvmwcy03mnx0-avahi-daemon.conf), and
+  # system.build.toplevel.drvPath is unchanged. Zero rebuild, zero behaviour
+  # change - mDNS publishing and user services stay on, which WiVRn needs to
+  # advertise itself to the headset.
+  services.avahi.publish = {
+    enable = lib.mkForce null;
+    userServices = lib.mkForce null;
+  };
+  services.avahi.settings.publish = {
+    disable-publishing = lib.mkDefault false;
+    disable-user-service-publishing = lib.mkDefault false;
+    publish-addresses = lib.mkDefault true;
+  };
+
+  # Silent today; one actionable line the day upstream fixes wivrn.nix, so the
+  # workaround above gets deleted instead of quietly rotting into a no-op.
+  warnings = lib.optional (!wivrnStillSetsObsoleteAvahiOptions) ''
+    modules/apps/vr.nix: nixpkgs' wivrn module no longer sets the obsolete
+    services.avahi.publish options. The mkForce/settings.publish block in that
+    file is now dead weight - delete it and this warning.
+  '';
 }
