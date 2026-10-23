@@ -1,5 +1,5 @@
 { pkgs, ... }: {
-  imports = [ ./packages.nix ./boox.nix ./latex.nix ];
+  imports = [ ./packages.nix ./boox.nix ./latex.nix ./tmp-sweep.nix ];
 
   home.username = "skirmitch";
   home.homeDirectory = "/home/skirmitch";
