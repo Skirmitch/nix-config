@@ -45,6 +45,30 @@ in
   # DATA ONLY, on purpose. Enabling this for metadata would let the kernel
   # reclaim metadata chunks too, shrinking exactly the headroom this module
   # exists to protect.
+  #
+  # WHY THIS UNIT HAS TO EXIST AT ALL: these sysfs knobs are NOT persistent -
+  # they reset to 0 on unmount and on every reboot. A one-off `echo 1 >` would
+  # silently lapse at the next boot, which is the whole reason this is a unit
+  # wired to multi-user.target rather than something done by hand once.
+  #
+  # AND WHY IT DOES NOT FIX THE EXISTING 272 GiB: reclaim is EDGE-TRIGGERED by
+  # default. A block group only becomes a candidate when a free operation drops
+  # its usage, and only a COMPLETELY empty one is reclaimed automatically. The
+  # data chunk size here is 10 GiB (allocation/data/chunk_size), so a chunk
+  # emptying entirely essentially never happens once files are scattered across
+  # them - which is why reclaim_count read 0 for this pool's whole life and why
+  # unallocated stayed at 1.00 MiB after the knob went on. Only a balance forces
+  # the consolidation. Prevention and cure are genuinely separate jobs here.
+  #
+  # There is a third knob, `periodic_reclaim`, which makes the kernel sweep
+  # existing block groups instead of waiting to be nudged. Left at 0
+  # deliberately: it would do balance-shaped I/O at times nobody chose, on the
+  # disk the stall probe already shows as this machine's bottleneck (io stall
+  # 24-48x the cpu stall). The manual balance below gets the same result under
+  # control. Revisit if the probe ever says / has I/O headroom to spare.
+  #
+  # Note `bg_reclaim_threshold` is NOT set here: dynamic_reclaim computes its
+  # own threshold and the two are documented as mutually exclusive.
   systemd.services.btrfs-dynamic-reclaim = {
     description = "Enable btrfs dynamic chunk reclaim for data on /";
     wantedBy = [ "multi-user.target" ];
