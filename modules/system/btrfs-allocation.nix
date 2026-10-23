@@ -31,10 +31,11 @@ in
   #
   # Allocation tracks the HIGH-WATER MARK, not current use, because the kernel
   # never returns an emptied chunk on its own unless dynamic_reclaim is on.
-  # Verified on this pool: dynamic_reclaim = 0 on all three space types and
-  # reclaim_count = 0 - it has never once reclaimed a chunk in its life. That is
-  # why freeing 189 GiB moved df from 93% to 71% and left unallocated at exactly
-  # 1.00 MiB. The data went; the carving did not.
+  # Verified on this pool BEFORE this module: dynamic_reclaim = 0 on all three
+  # space types and reclaim_count = 0 - it had never once reclaimed a chunk in
+  # the pool's life. That is why freeing 189 GiB moved df from 93% to 71% and
+  # left unallocated at exactly 1.00 MiB. The data went; the carving did not.
+  # (What changed once the knob went on is measured further down.)
   #
   # /mnt/bulk does NOT have this problem (466.84 GiB unallocated), so both units
   # below are scoped to / deliberately.
@@ -51,24 +52,39 @@ in
   # silently lapse at the next boot, which is the whole reason this is a unit
   # wired to multi-user.target rather than something done by hand once.
   #
-  # AND WHY IT DOES NOT FIX THE EXISTING 272 GiB: reclaim is EDGE-TRIGGERED by
-  # default. A block group only becomes a candidate when a free operation drops
-  # its usage, and only a COMPLETELY empty one is reclaimed automatically. The
-  # data chunk size here is 10 GiB (allocation/data/chunk_size), so a chunk
-  # emptying entirely essentially never happens once files are scattered across
-  # them - which is why reclaim_count read 0 for this pool's whole life and why
-  # unallocated stayed at 1.00 MiB after the knob went on. Only a balance forces
-  # the consolidation. Prevention and cure are genuinely separate jobs here.
+  # WHAT IT ACTUALLY DOES, measured 1 h 26 min after the unit first ran
+  # (11:53:37 -> 13:20 on 2026-10-23): reclaim_count 0 -> 4, reclaim_bytes
+  # 3.04 GiB, reclaim_errors 0, Data allocated 898.50 -> 894.50 GiB, and
+  # unallocated 1.00 MiB -> 4.00 GiB. It works, and it is NOT limited to
+  # completely empty block groups: it RELOCATES partly-used ones, which is why
+  # reclaim_bytes is non-zero at all. An earlier version of this comment claimed
+  # the opposite from the docs; the box says otherwise.
   #
-  # There is a third knob, `periodic_reclaim`, which makes the kernel sweep
-  # existing block groups instead of waiting to be nudged. Left at 0
-  # deliberately: it would do balance-shaped I/O at times nobody chose, on the
-  # disk the stall probe already shows as this machine's bottleneck (io stall
-  # 24-48x the cpu stall). The manual balance below gets the same result under
-  # control. Revisit if the probe ever says / has I/O headroom to spare.
+  # But it is a PRESSURE VALVE, not a defragmenter, and the feedback loop is
+  # visible in the knobs. `bg_reclaim_threshold` is the usage percentage below
+  # which a block group becomes a candidate, and dynamic_reclaim REWRITES IT
+  # LIVE: it read 89 while unallocated was 1.00 MiB and 59 once 4 GiB existed.
+  # The kernel backs off the moment the pressure eases - it targets ENOUGH
+  # unallocated, never MAXIMUM. So do not expect it to walk the pool back on its
+  # own, and do not set bg_reclaim_threshold by hand: this knob owns it.
   #
-  # Note `bg_reclaim_threshold` is NOT set here: dynamic_reclaim computes its
-  # own threshold and the two are documented as mutually exclusive.
+  # It is also EDGE-TRIGGERED: a block group becomes a candidate only when a
+  # free operation drops its usage, so nothing sweeps block groups that are
+  # merely sitting there half full. That is the half `periodic_reclaim` would
+  # change, and it is why the 262 GiB of free space still inside data chunks
+  # needs the balance below rather than patience.
+  #
+  # The safety line that matters: 4.00 GiB unallocated is enough to carve a new
+  # metadata chunk (DUP, 1 GiB chunk_size, so 2 GiB of device). The read-only
+  # deadlock described above has receded for the first time since the pool
+  # filled - from zero headroom to two spare metadata chunks' worth.
+  #
+  # `periodic_reclaim` left at 0 deliberately: it makes the kernel sweep
+  # existing block groups instead of waiting to be nudged, which is
+  # balance-shaped I/O at times nobody chose, on the disk the stall probe
+  # already shows as this machine's bottleneck (io stall 24-48x the cpu stall).
+  # The manual balance below gets the same result under control. Revisit if the
+  # probe ever says / has I/O headroom to spare.
   systemd.services.btrfs-dynamic-reclaim = {
     description = "Enable btrfs dynamic chunk reclaim for data on /";
     wantedBy = [ "multi-user.target" ];
@@ -101,7 +117,7 @@ in
   # No `wantedBy` and no timer, by design. A balance rewrites real data, so it
   # is heavy sequential I/O and must be a deliberate choice about when the box
   # is free - not something that ambushes a working session. The 189 GiB sweep
-  # is what makes it cheap: there are now 272 GiB of free space inside the data
+  # is what makes it cheap: there are now 262 GiB of free space inside the data
   # chunks for extents to be packed into, where before there were 72.
   #
   # The three passes escalate on purpose. -dusage=0 only deletes chunks that are
