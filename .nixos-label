@@ -1,1 +1,1 @@
-btrfs chunk reclaim + /tmp sweep timer
+Enable PYTEST_DEBUG_TEMPROOT on the bulk disk
