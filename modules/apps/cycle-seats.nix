@@ -1101,7 +1101,7 @@ in
         Both seats independently asked for a TABLE rather than an alternation, and the
         proof it matters is already in the tree: the exemption regex shipped as
         `(_operator|_builder)` would have silently dropped a third seat's test databases
-        nightly, and the Constructor and Seba folders already exist.
+        nightly, and two further seat folders already exist.
       '';
       type = types.attrsOf (types.submodule {
         options = {

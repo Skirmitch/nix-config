@@ -4,7 +4,7 @@ let
   roles = lib.mapAttrsToList (_: s: s.dbRole) seats;
   # The exemption pattern is GENERATED. Shipped by hand as `(_operator|_builder)` it
   # would have silently dropped a third seat's test databases at 04:30 - both seats
-  # independently warned about exactly this, and Constructor and Seba folders exist.
+  # independently warned about exactly this, and two further seat folders exist.
   suffixAlt = lib.concatStringsSep "|" (map (r: lib.removePrefix "lonchera" r) roles);
   # THE CHECK IS A PACKAGE, so the systemd unit and the rebuild-time warning run the
   # SAME bytes. Same reason as cycle-assert-plain-dir in cycle-seats.nix: two copies of
@@ -229,8 +229,8 @@ in {
   # leftover databases, 16 GiB**, accumulating 1-2 GiB/week. 751 were dropped by
   # hand; this keeps it from coming back.
   #
-  # The real fix belongs in pytest.ini, but that is Ignacio's business code, so
-  # the cleanup lives here instead.
+  # The real fix belongs in pytest.ini, but that is application code this repo
+  # does not own, so the cleanup lives here instead.
   # --- COLLATION VERSION CHECK: learn at REBUILD time, not from a red test run -----
   #
   # PostgreSQL does not sort text itself; it asks glibc. So a text index is physically

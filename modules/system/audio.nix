@@ -2,13 +2,24 @@
 let
   boseHelper = pkgs.writeShellScriptBin "bose" ''
     set -u
-    MAC="''${BOSE_MAC:-BC:87:FA:29:65:4D}"
+    PATH=${pkgs.lib.makeBinPath (with pkgs; [ bluez pulseaudio pipewire coreutils gnugrep gawk systemd ffmpeg glib ])}:$PATH
+
+    # The MAC is deliberately NOT in this repo: it was the one piece of private
+    # data a public git history carried, and it was redundant - BlueZ already
+    # stores the address in /var/lib/bluetooth on this machine. Resolve it from
+    # the paired-device list by name instead, and let BOSE_MAC override. This
+    # has to sit AFTER the PATH line above, because that is what puts
+    # bluetoothctl on the path.
+    MAC="''${BOSE_MAC:-$(bluetoothctl devices 2>/dev/null | awk '/Bose/ {print $2; exit}')}"
+    if [ -z "$MAC" ]; then
+      echo "bose: no paired Bose device found - is bluetoothd up? Set BOSE_MAC to override." >&2
+      exit 2
+    fi
     DEV="/org/bluez/hci0/dev_''${MAC//:/_}"
     CARD="bluez_card.''${MAC//:/_}"
     SINK="bluez_output.''${MAC//:/_}.1"
     SETTLE="''${BOSE_SETTLE:-12}"     # s from Connected=true to a stable transport (8 s measured)
     COOLDOWN="''${BOSE_COOLDOWN:-30}" # s to ignore the Connected our own reconnect emits
-    PATH=${pkgs.lib.makeBinPath (with pkgs; [ bluez pulseaudio pipewire coreutils gnugrep gawk systemd ffmpeg glib ])}:$PATH
 
     log() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*"; }
 
