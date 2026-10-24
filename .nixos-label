@@ -1,1 +1,1 @@
-Enable PYTEST_DEBUG_TEMPROOT on the bulk disk
+Roll hc-store onto the stale-mirror and future-date fixes
