@@ -64,16 +64,31 @@
 
     # Health Connect pipeline (store side): ~/Projects/hc-sync exposes
     # packages.hc-store and packages.datasette; modules/apps/health-store.nix
-    # consumes them. A path input is re-copied on `nix flake update`, which
-    # is the intended way to roll a new version onto the box.
-    # `path:` copies the working tree verbatim - .gitignore and all, including
-    # .git - so it used to ship 84 MB of Android build intermediates to
-    # /nix/store on every lock (finding 36, v3 63). Build outputs now live in
-    # ~/.cache/hc-sync (android/build.gradle.kts + gradle.properties), which
-    # keeps the copy at ~1 MB. Switch to git+file:///home/skirmitch/Projects/hc-sync
-    # once the repo has its first commit: that copies tracked files only and
-    # gives the deployed system a revision to be identified by.
-    hc-sync.url = "path:/home/skirmitch/Projects/hc-sync";
+    # consumes them. `nix flake update hc-sync` is how a new version rolls onto
+    # the box.
+    #
+    # `git+file:` since 2026-10-24, having been `path:` before. Two reasons,
+    # both of which bit on the day it changed:
+    #
+    #   1. A `path:` input locks only a narHash, so THE LOCK CANNOT IDENTIFY A
+    #      REVISION. When Archivist handed over "deploy 711ee6c" there was no
+    #      way to show from nix-config that the tree copied was that commit -
+    #      it had to be proved by hand (HEAD, 0 dirty, 0 untracked) and the
+    #      proof did not survive into the lock. `git+file:` records the rev, so
+    #      the deployed system is identifiable afterwards and a dirty tree
+    #      cannot silently ship.
+    #   2. `path:` copies the working tree VERBATIM, .gitignore and all. It
+    #      used to ship 84 MB of Android build intermediates (finding 36,
+    #      v3 63); moving those to ~/.cache/hc-sync got the copy to ~1 MB, but
+    #      it was still carrying .envrc, .pytest_cache, .ruff_cache and five
+    #      __pycache__ trees into /nix/store. `git+file:` copies tracked files
+    #      only, so that stops by construction rather than by vigilance.
+    #
+    # Checked before switching, because tracked-only is a real behaviour change:
+    # 0 untracked files, 0 submodules (so no ?submodules=1), HEAD on master, and
+    # none of the 9 ignored entries is a build input. The acid test is that
+    # hc-store's drvPath through this flake did not move across the change.
+    hc-sync.url = "git+file:///home/skirmitch/Projects/hc-sync";
     hc-sync.inputs.nixpkgs.follows = "nixpkgs";
   };
 

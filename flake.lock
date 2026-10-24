@@ -103,14 +103,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1792847326,
-        "narHash": "sha256-Ya9Vd41wJ88wZcnHvKYIp3D65swYOelx2oG/9VKN0mY=",
-        "path": "/home/skirmitch/Projects/hc-sync",
-        "type": "path"
+        "lastModified": 1792846990,
+        "narHash": "sha256-0Pr4NkqSvYTVKGstXOrlP1dJlyCpWbn/OaROR3lAH6I=",
+        "ref": "refs/heads/master",
+        "rev": "711ee6c1183b30c88cb475af2927b9c4b2567626",
+        "revCount": 112,
+        "type": "git",
+        "url": "file:///home/skirmitch/Projects/hc-sync"
       },
       "original": {
-        "path": "/home/skirmitch/Projects/hc-sync",
-        "type": "path"
+        "type": "git",
+        "url": "file:///home/skirmitch/Projects/hc-sync"
       }
     },
     "home-manager": {
