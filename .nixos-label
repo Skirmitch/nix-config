@@ -1,1 +1,1 @@
-systemd-initrd PHASE1 probe - no wipe yet
+systemd-initrd PHASE2 wipe LIVE

@@ -40,7 +40,7 @@ let
   #
   # DELETE the probe branch and this toggle in Phase 3, once the wipe is
   # verified. It is migration scaffolding, not a feature.
-  rollbackMode = "probe";
+  rollbackMode = "wipe";
 
   # Records what happened and DELETES NOTHING. One block is appended PER
   # INVOCATION, which is the whole point: if the re-run bug survived
@@ -90,7 +90,18 @@ let
     done < /proc/self/mounts
 
     mkdir -p /mnt
-    mount -t btrfs -o subvol=/ ${rootDevice} /mnt
+    # Guard 1: a failed mount must FAIL, not fall through. Without this the
+    # steps below are silent no-ops against an empty /mnt and the only thing
+    # returning non-zero is the final `umount` - i.e. the script is fail-closed
+    # by accident, not by design. That exact shape hid a dead wipe for 4 days
+    # (see the nvme-renumber incident).
+    mount -t btrfs -o subvol=/ ${rootDevice} /mnt || { echo "rollback: mount of ${rootDevice} FAILED - refusing to touch anything"; exit 1; }
+
+    # Guard 2: verify the DESTINATION before destroying the source. The park
+    # below moves the live root aside and the snapshot that replaces it happens
+    # at the very end; if @root-blank were missing we would already have parked
+    # @root and have no / to boot.
+    [ -e /mnt/@root-blank ] || { echo "rollback: @root-blank MISSING - refusing to park @root"; exit 1; }
 
     if [ -e /mnt/@root ]; then
       mkdir -p /mnt/old_roots

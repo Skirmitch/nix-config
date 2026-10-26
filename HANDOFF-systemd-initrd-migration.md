@@ -14,6 +14,70 @@ This file is self-contained. Companion notes:
 
 ---
 
+> ## ⚠ CURRENT STATE — 2026-10-26 20:30. READ THIS BEFORE ANYTHING BELOW.
+>
+> **Phase 1 is STAGED AND ARMED.** Generation **294**
+> (`systemd-initrd_PHASE1_probe_-_no_wipe_yet`, store path
+> `04cqj3v0f1hj22568zpldnbjqq34hyas`) is built, closure-verified, and is the
+> bootloader default. Generation **293** (`Roll_hc-store_…`) is the escape hatch.
+> Commit `63c3709`. JL is physically at the keyboard. The header above saying
+> "nothing is staged" is now FALSE.
+>
+> **THE DOCUMENTED RECOVERY BELOW NO LONGER WORKS.** Lines 54, 134, 156 and 273
+> tell you to set `boot.initrd.systemd.enable = false` (or `true`). nixpkgs
+> **removed scripted initrd** in the 2026-10-26 bump and the option is now a
+> `mkRemovedOptionModule`: setting it to *either* value **refuses evaluation**.
+> Systemd stage 1 is the only initrd there is. Treat every mention of that
+> option below as historical.
+>
+> **So recovery is exactly one thing:** pick generation **293** in the
+> systemd-boot menu. That is the whole escape hatch. `emergencyAccess = true` is
+> live and gives an initrd console — useful at the physical keyboard, worth
+> nothing over a network, because GNOME Desktop Sharing only exists inside a
+> logged-in session and `grdctl --system` reads `Status: disabled`.
+>
+> **This boot PROVES ORDERING ONLY — it does not restore impermanence.**
+> `rollbackMode = "probe"` (hosts/diana/impermanence.nix:43) selects a 19-line
+> script with **zero destructive verbs**: it mounts `subvol=/` from
+> `${rootDevice}` (= `config.fileSystems."/".device`, by-uuid — the 2026-10-22
+> NVMe-renumber bug cannot recur), appends one line to the filesystem's
+> top-level `ordering-probe.txt`, syncs, unmounts. Nothing is parked, nothing is
+> wiped. `/` stays non-ephemeral until Phase 2. Corollary: the "clear /tmp
+> first" rule does **not** apply to this boot — nothing gets parked.
+>
+> **Read the verdict after the reboot:**
+> ```
+> sudo mount -o subvolid=5 /dev/disk/by-uuid/3e5658eb-f316-490b-855c-9efce6e920eb /tmp/tl
+> sudo cat /tmp/tl/ordering-probe.txt
+> ```
+> * `OK - ordering holds` → Phase 2 opens: flip `rollbackMode` to `"wipe"`.
+> * `FAIL - /sysroot ALREADY MOUNTED` → ordering is broken. Change nothing;
+>   investigate. The unit is `requiredBy = [ "sysroot.mount" ]`, fail-closed **by
+>   design**, so a hard failure stops the boot and you recover at the menu.
+>
+> **Preconditions verified 2026-10-26, do not re-derive:** `old_roots` holds
+> exactly **2** parked roots (10-06, 10-15) — the re-run trap's requirement is
+> met. Swap healthy (zram 24G + 128G file, `@persist-backup` deleted, so the
+> ETXTBSY/COW trap is closed). **No glibc movement** in the closure → the
+> Postgres collation hazard does not apply to this boot. hc-store's `mcp_1` pin
+> held (`python3.14-mcp-1.29.0`; the `mcp-2.2.0` in the closure arrives via a
+> different package). The kernel keeps version 7.3 but **changes store path**
+> (`sby4x25d…` → `wjng0666…`), which rebuilt `nvidia-x11`, `v4l2loopback` and
+> `xpadneo` — this is why the verb is `boot` + reboot and **never** `switch`.
+>
+> **Do not run `dif`.** It calls a bare `nix flake update`, which would move
+> nixpkgs again and drag `hc-sync` to master tip (it is a `git+file:` input with
+> no `?rev=`, i.e. a branch follower). Use
+> `nixos-rebuild build --flake ~/nix-config#diana` to re-verify. `hc-sync` is
+> intentionally **1 commit behind** its branch (`78676e9`, docstring-only) —
+> leave it there; re-bumping changes a verified artifact for a comment.
+>
+> **Phase 3 cleanup, once the wipe is verified:** revert
+> `boot.initrd.systemd.emergencyAccess`, delete the `rollbackMode` toggle and the
+> probe branch, delete `@home-backup`, delete this file.
+
+---
+
 
 ## ⛔ PREREQUISITE (added 2026-09-25): there must be at least 2 parked roots
 
