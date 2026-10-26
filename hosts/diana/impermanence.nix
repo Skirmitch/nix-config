@@ -1,105 +1,181 @@
-{ lib, ... }: {
+{ config, utils, ... }:
+let
+  # THE DEVICE COMES FROM fileSystems, AND THAT IS NOT TIDINESS - it is the fix
+  # for an outage this file caused.
+  #
+  # The scripted version hard-coded `/dev/nvme2n1p2`. At the 2026-10-22 19:30
+  # boot the kernel went 7.2.10 -> 7.3.0 and the two NVMe controllers swapped
+  # instance numbers. Same partition, same minor 259:9, new name:
+  #
+  #   Oct 15, 7.2.10:   nvme1n1: p1    nvme2n1: p1 p2   -> root = nvme2n1p2
+  #   Oct 22, 7.3.0:    nvme2n1: p1    nvme1n1: p1 p2   -> root = nvme1n1p2
+  #
+  # The wipe ran without `set -e`, so the whole cascade was silent:
+  #
+  #   stage-1-init: mount: /mnt: special device /dev/nvme2n1p2 does not exist.
+  #   stage-1-init: ERROR: Could not statfs: No such file or directory
+  #   stage-1-init: umount: can't unmount /mnt: Invalid argument
+  #   stage-1-init: mounting /dev/disk/by-uuid/3e5658eb-... on /...
+  #
+  # - and stage 1 then mounted the STALE root by-uuid as if nothing had
+  # happened. `/` stopped being ephemeral for four days and nothing surfaced it,
+  # because every fileSystems entry already uses by-uuid and the box booted
+  # perfectly. Measured by ctime, not mtime (mtime is forgeable: an extracted
+  # APK under /tmp carried 1979 stamps): 385,658 entries on `/` predated the
+  # Oct 22 boot, while only 11 predated the Oct 15 one and every one of those
+  # was a mountpoint or a /persist bind. 31 GB of /tmp was still live.
+  #
+  # The 2026-09-24 handoff called this exact shot - "Device node VARIES ACROSS
+  # BOOTS - always by-uuid" - eleven days before it fired. Deriving the node
+  # from fileSystems is what makes that advice structural instead of a note.
+  rootDevice = config.fileSystems."/".device;
+  rootDeviceUnit = "${utils.escapeSystemdPath rootDevice}.device";
 
-  # --- INITRD WIPE SCRIPT ---
-  boot.initrd.postDeviceCommands = lib.mkAfter ''
-    mkdir /mnt
-    mount -t btrfs /dev/nvme2n1p2 /mnt
+  # --- PHASE TOGGLE: "probe" (Phase 1) -> "wipe" (Phase 2) ---
+  #
+  # The migration is deliberately two reboots, and this is the switch between
+  # them. It exists so the ORDERING STANZAS BELOW ARE SHARED BYTE FOR BYTE
+  # between the two phases: Phase 2 is a one-word edit here, not a re-paste that
+  # could silently differ from the arrangement Phase 1 just proved.
+  #
+  # DELETE the probe branch and this toggle in Phase 3, once the wipe is
+  # verified. It is migration scaffolding, not a feature.
+  rollbackMode = "probe";
+
+  # Records what happened and DELETES NOTHING. One block is appended PER
+  # INVOCATION, which is the whole point: if the re-run bug survived
+  # RemainAfterExit, this boot writes TWO blocks instead of one, rather than the
+  # re-run being assumed away. The file lands at the btrfs TOP LEVEL, so it
+  # survives the wipe that Phase 2 turns on and is read back by mounting
+  # subvolid=5.
+  #
+  # `if` rather than the handoff draft's `[ ... ] && already=yes`: measured
+  # 2026-10-26 that both survive the `set -e` makeJobScript injects, so the
+  # draft was not broken - this form is simply the same shape as the wipe's
+  # guard below, and a unit that is requiredBy sysroot.mount is the wrong place
+  # to leave a construct whose set -e behaviour has to be reasoned about.
+  probeScript = ''
+    already=no
+    while read -r _ mp _; do
+      if [ "$mp" = /sysroot ]; then already=yes; fi
+    done < /proc/self/mounts
+
+    mkdir -p /mnt
+    mount -t btrfs -o subvol=/ ${rootDevice} /mnt
+    {
+      echo "=== $(date -Is 2>/dev/null || echo no-date) invocation"
+      if [ "$already" = yes ]; then
+        echo "FAIL - /sysroot ALREADY MOUNTED (ordering broke, or this is a re-run)"
+      else
+        echo "OK - ordering holds"
+      fi
+    } >> /mnt/ordering-probe.txt
+    sync
+    umount /mnt
+  '';
+
+  wipeScript = ''
+    # A stray second invocation must be a no-op, not gen 127 again - but it
+    # must SAY SO. With this guard a broken ordering looks identical to a
+    # harmless re-run: both exit 0 and neither wipes. That is the exact shape
+    # of the four-day failure described above, so the one thing it must never
+    # do is stay quiet. The journal lives on @log, which survives the wipe, so
+    # `journalctl -b -u rollback` keeps the evidence either way.
+    while read -r _ mp _; do
+      if [ "$mp" = /sysroot ]; then
+        echo "rollback: /sysroot already mounted - NOT wiping." \
+             "Either this is the documented re-run, or the ordering broke."
+        exit 0
+      fi
+    done < /proc/self/mounts
+
+    mkdir -p /mnt
+    mount -t btrfs -o subvol=/ ${rootDevice} /mnt
+
     if [ -e /mnt/@root ]; then
-        mkdir -p /mnt/old_roots
-        timestamp=$(date +%Y-%m-%d_%H-%M-%S)
-        mv /mnt/@root "/mnt/old_roots/@root_$timestamp"
+      mkdir -p /mnt/old_roots
+      mv /mnt/@root "/mnt/old_roots/@root_$(date +%Y-%m-%d_%H-%M-%S)"
     fi
 
-    delete_subvolumes() {
-        # GUARD 1 of 2 - the target MUST be inside old_roots/@root_*.
-        #
-        # Two separate escapes make this necessary, both verified against the
-        # real initrd busybox in a VM:
-        #
-        #  (a) WORD SPLITTING. The retention loop below used an unquoted
-        #      $(...), so a parked entry named `@root_x mnt` split into two
-        #      words and handed the bare word `mnt` to this function. Stage 1
-        #      runs with cwd=/, so `mnt` resolves to the btrfs TOP LEVEL, which
-        #      is itself a subvolume root (inode 256) and sailed past guard 2.
-        #      `btrfs subvolume list -o mnt` then returned every top-level
-        #      subvolume and the recursion deleted @home, @persist, @nix, @log
-        #      and @root-blank. A single SPACE in a name was the whole exploit.
-        #
-        #  (b) EMBEDDED NEWLINES. `btrfs subvolume list` prints names raw
-        #      (btrfs-progs 7.1 cmds/subvolume-list.c:1198, no escaping), and
-        #      IFS is a newline here, so a nested subvolume named
-        #      "x<newline>@nix" yielded a second word `@nix` -> /mnt/@nix.
-        #      Creating a subvolume is UNPRIVILEGED, and /tmp and /var/tmp are
-        #      1777, so any local process could plant a delayed root-level
-        #      delete that fires two boots later.
-        #
-        # This prefix test rejects every such fragment: `mnt`, `@nix`,
-        # `/mnt/@home` - none of them start with /mnt/old_roots/@root_.
-        case "$1" in
-            /mnt/old_roots/@root_*) ;;
-            *) return 0 ;;
+    # RETENTION - keep the 2 newest parked roots.
+    #
+    # Carried over from the scripted version deliberately. The handoff's own
+    # prerequisite says so, and its draft change block contradicted itself by
+    # replacing the move-aside with a bare delete: the parked roots ARE the
+    # forensic record for this migration - both May failures were diagnosed by
+    # reading them. Without retention 57 roots once accumulated (~175 GiB).
+    #
+    # A bash glob expands already sorted, and @root_YYYY-MM-DD_HH-MM-SS sorts
+    # lexically == chronologically, so the newest two are simply the last two.
+    # No `ls`, no command substitution, no word splitting - which is what let
+    # a name containing a space hand the btrfs TOP LEVEL to the old recursive
+    # delete and take @home and @persist with it.
+    shopt -s nullglob
+    parked=(/mnt/old_roots/@root_*)
+    shopt -u nullglob
+    n=''${#parked[@]}
+    if [ "$n" -gt 2 ]; then
+      for p in "''${parked[@]:0:$((n - 2))}"; do
+        # Belt: never hand `delete -R` anything outside old_roots.
+        case "$p" in
+          /mnt/old_roots/@root_*) btrfs subvolume delete -R "$p" ;;
         esac
+      done
+    fi
 
-        # GUARD 2 of 2 - the target must be a real subvolume ROOT.
-        #
-        # `btrfs subvolume list -o <path>` does NOT fail on a non-subvolume: it
-        # falls back to the tree CONTAINING that path (lookup_path_rootid), and
-        # for anything under old_roots/ that tree is the btrfs TOP LEVEL, id 5.
-        # The -o filter would then list @home, @persist, @nix, @log and
-        # @root-blank as "children", and this recursion would delete every one
-        # of them, leaving /home and /persist destroyed and the machine
-        # unbootable. Nothing is mounted here, so every delete would succeed.
-        #
-        # A plain directory named @root_* in old_roots is enough to trigger it -
-        # e.g. a `mkdir`, `cp -a` or `cp --reflink` rescue done by hand at the
-        # top level, which is exactly the kind of thing the two retained roots
-        # exist to invite during the systemd-initrd migration.
-        #
-        # Subvolume roots ALWAYS have inode 256; plain directories never do
-        # (verified on this box: / /home /persist /nix = 256, /etc = 271).
-        # busybox stat does not dereference, so a symlink is skipped too.
-        [ "$(stat -c %i "$1" 2>/dev/null)" = 256 ] || return 0
-        IFS=$'\n'
-        for i in $(btrfs subvolume list -o "$1" | cut -f 9- -d ' '); do
-            delete_subvolumes "/mnt/$i"
-        done
-        btrfs subvolume delete "$1"
-    }
-
-    # RETENTION - keep only the 2 most recent parked roots.
-    #
-    # Without this the move-aside above never deleted anything: 57 roots had
-    # accumulated by 2026-09-25 (~175 GiB, the single largest non-game item on
-    # the disk). delete_subvolumes() was defined here from the start and simply
-    # never called. Worse, /tmp lives on @root rather than tmpfs, so every
-    # boot's /tmp is frozen forever too - one agent-workflow day parked 34 GiB
-    # of `git clone --shared` trees under /tmp/closure-w1-*.
-    #
-    # TWO are kept deliberately, not for safety margin but as the rollback
-    # evidence for the pending systemd-initrd migration: if the new unit wipes
-    # or parks the wrong subvolume again (it did twice in May 2026), the
-    # previous boots' roots are what we inspect to work out what happened.
-    #
-    # Placement matters: this MUST sit after delete_subvolumes() is defined.
-    # busybox ash resolves a function only once its definition has been
-    # executed, so calling it earlier fails with "not found" - and because the
-    # wipe script runs without `set -e`, that failure is silent and the leak
-    # quietly continues.
-    #
-    # Names sort chronologically (@root_YYYY-MM-DD_HH-MM-SS), so reverse-sort
-    # and drop the first two. `tail -n +3` is busybox-safe; `head -n -2` is not.
-    # `while IFS= read -r` instead of `for i in $(...)`: the unquoted command
-    # substitution split names on spaces and tabs AND glob-expanded them, which
-    # is escape (a) described above. read -r with an empty IFS takes each line
-    # whole and does no globbing.
-    ls -1d /mnt/old_roots/@root_* 2>/dev/null | sort -r | tail -n +3 |
-    while IFS= read -r parked; do
-        delete_subvolumes "$parked"
-    done
-
+    # `delete -R`, not the hand-rolled `subvolume list -o` recursion the
+    # scripted version needed: a plain delete fails ENOTEMPTY because NixOS
+    # makes /srv and /var/tmp nested subvolumes. btrfs-progs 7.1 has -R.
     btrfs subvolume snapshot /mnt/@root-blank /mnt/@root
     umount /mnt
   '';
+in
+{
+
+  # --- INITRD WIPE UNIT (systemd stage 1) ---
+  #
+  # Was `boot.initrd.postDeviceCommands`. nixpkgs REMOVED scripted initrd in the
+  # 2026-10-26 input bump: both that option and `boot.initrd.systemd.enable` are
+  # now `mkRemovedOptionModule` (nixos/modules/system/boot/systemd/initrd.nix
+  # :194-216), so eval refuses outright and the `enable = false` escape hatch is
+  # gone. This migration is no longer optional and no longer deferrable.
+  #
+  # IT FAILED TWICE IN MAY 2026, and the cause was NOT the ordering: the unit
+  # RAN TWICE. `Type=oneshot` without RemainAfterExit leaves a finished unit
+  # inactive, so its start job is never redundant (job.c:446-448);
+  # initrd-cleanup.service isolates initrd-switch-root.target, which pulls
+  # sysroot.mount, which pulls this unit again - and transaction_collect_garbage
+  # is skipped in JOB_ISOLATE mode (transaction.c:749,774). Gen 126 moved the
+  # ALREADY-MOUNTED live root into old_roots on its second pass; gen 127 deleted
+  # it mid-switch-root and hung. Poettering prescribed RemainAfterExit=yes for
+  # exactly this in systemd#29367; zfs.nix, bcachefs.nix and initrd.nix all do
+  # it. The guards in both scripts above are the second belt.
+  boot.initrd.systemd.services.rollback = {
+    description = "Roll @root back to a pristine @root-blank snapshot";
+    # `before` alone never pulls a unit into the transaction; this does.
+    wantedBy = [ "initrd.target" ];
+    after = [ rootDeviceUnit ];
+    requires = [ rootDeviceUnit ];
+    before = [ "sysroot.mount" "shutdown.target" ];
+    # Fail CLOSED. Misterio77's widely-copied config omits this and boots a
+    # stale root silently when the rollback fails - which is precisely the
+    # failure mode that went unnoticed for four days above.
+    requiredBy = [ "sysroot.mount" ];
+    conflicts = [ "shutdown.target" ];
+    unitConfig.DefaultDependencies = false;
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;      # <- THE FIX. See the May 2026 note above.
+      TimeoutStartSec = "180s";    # a stall fails to emergency instead of hanging
+    };
+    # NO `path`: stage1ServiceConfig omits the stage-2 defaults
+    # (systemd-lib.nix:648-650,710), so setting it would REPLACE PATH and hide
+    # /bin's coreutils. The initrd already has coreutils, bash, btrfs-progs
+    # (btrfs.nix:118) and mount/umount. The script runs under bash with `set -e`
+    # injected by makeJobScript (systemd-lib.nix:555) - every line is written to
+    # survive that.
+    script = if rollbackMode == "probe" then probeScript else wipeScript;
+  };
 
   # --- PERSISTENCE DEFINITIONS ---
   environment.persistence."/persist" = {

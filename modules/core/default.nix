@@ -89,116 +89,6 @@ let
     });
   };
 
-  # --- v4l2loopback: it ships the KERNEL's depmod index --------------------
-  #
-  # Kernel 7.3 broke the module tree. `nixos-rebuild build` fails with
-  #
-  #   pkgs.buildEnv error: two given paths contain a conflicting subpath:
-  #     `...-v4l2loopback-0.15.4/lib/modules/7.3.0/modules.alias' and
-  #     `...-linux-7.3-modules/lib/modules/7.3.0/modules.alias'
-  #
-  # and the toplevel dies on that one dependency, so `dif` never reaches
-  # `nvd diff` and prints nothing useful. NOTE THAT EVAL IS GREEN: `nix eval` on
-  # the toplevel drvPath succeeds, so this is only visible in a build log.
-  #
-  # v4l2loopback-0.15.4 installs TEN depmod index files next to its own .ko -
-  # modules.alias{,.bin}, modules.dep{,.bin}, modules.softdep,
-  # modules.symbols{,.bin}, modules.builtin.alias.bin, modules.builtin.bin,
-  # modules.devname - and every one of them is also in the kernel's output.
-  #
-  # nixpkgs already tries to stop this: the derivation's preBuild runs
-  # `sed -i '/depmod/d' Makefile`. It no longer matches, and unlike the
-  # `substituteInPlace --replace-fail` on the line above it, a bare sed FAILS
-  # SILENTLY. depmod is invoked by the kernel's own scripts/Makefile.modinst via
-  # `make modules_install`, which that sed cannot reach at all.
-  #
-  # THIS IS NOT A WORKAROUND. pkgs/os-specific/linux/kmod/aggregator.nix - the
-  # buildEnv that refuses above - does exactly this in its own postBuild:
-  #     rm -f $out/lib/modules/$kernelVersion/modules.!(builtin*|order*)
-  #     depmod -b $out -C $out/etc/depmod.d -a $kernelVersion
-  # It deletes and regenerates the very files that made the merge refuse. But
-  # buildEnv merges BEFORE postBuild, so that cleanup is never reached. The index
-  # we strip here is thrown away and rebuilt by depmod regardless, which is why
-  # this carries no functional risk.
-  #
-  # Remove ALL of modules.*, not the aggregator's !(builtin*|order*) subset:
-  # v4l2loopback also ships modules.builtin.alias.bin and modules.builtin.bin,
-  # and those are in the kernel's set too, so sparing `builtin*` would leave two
-  # live collisions and fail identically one file later.
-  #
-  # Scoped to linuxPackages_latest.extend, NOT a top-level `v4l2loopback`
-  # override: pkgs.v4l2loopback DOES NOT EXIST (checked - `nix eval` on it
-  # errors), so overriding that name would define a fresh attribute nothing
-  # consumes and the build would fail exactly as before. Verified instead with a
-  # probe marker that the extend really reaches
-  # linuxPackages_latest.v4l2loopback before this was written.
-  # boot.kernelPackages = pkgs.linuxPackages_latest in hosts/diana/default.nix.
-  #
-  # v4l2loopback is not droppable: programs.immersed.enable pulls it in, and
-  # modules/apps/g9cam.nix needs devices=2 video_nr=0,9 for the Lumix G9 cam.
-  # Measured 2026-10-22: it is the ONLY offender - xpadneo and the nvidia kernel
-  # modules ship 0 index files each.
-  #
-  # THE `test -e` IS A TRIPWIRE, not a sanity check. When upstream or nixpkgs
-  # stops shipping the index, it fails loudly and this overlay gets deleted
-  # rather than quietly outliving its reason. Same contract as the ltrace
-  # overlay above: `dif` goes red at that moment, and that is the point.
-  v4l2loopbackDepmodIndexOverlay = _final: prev: {
-    linuxPackages_latest = prev.linuxPackages_latest.extend (
-      _lpfinal: lpprev: {
-        v4l2loopback = lpprev.v4l2loopback.overrideAttrs (old: {
-          postInstall = (old.postInstall or "") + ''
-            for d in "$out"/lib/modules/*/; do
-              test -e "$d/modules.alias"
-              rm -f "$d"/modules.*
-            done
-          '';
-        });
-      }
-    );
-  };
-  # --- mozc: Qt 6.12's uic rejects its fully-qualified widget class --------
-  #
-  # Qt 6.12 made `uic` validate custom-widget class names, and a LEADING `::`
-  # is no longer accepted. mozc 2.30.5544.102 uses one, so the build dies at
-  #
-  #   gui/dictionary_tool/dictionary_tool.ui:
-  #     Invalid class name: "::mozc::gui::DictionaryContentTableWidget"
-  #   File 'gui/dictionary_tool/dictionary_tool.ui' is not valid
-  #
-  # which cascades mozc -> fcitx5-mozc -> fcitx5-with-addons -> system-path ->
-  # toplevel. That is the SECOND independent breakage in the 2026-10-22 input
-  # bump; the first was v4l2loopback above. They are unrelated.
-  #
-  # Exactly one .ui file is affected and it names the class twice: once as the
-  # widget's `class=` attribute and once in its <customwidget><class> entry.
-  # Checked across every .ui in the tree - dictionary_tool.ui is the only hit.
-  #
-  # DROPPING THE `::` WAS NOT ASSUMED TO BE SAFE. The worry was real: if uic
-  # emitted its header inside `namespace mozc::gui`, the unqualified name would
-  # resolve to mozc::gui::mozc::gui::... and fail to compile, which is exactly
-  # the kind of thing that looks fine in a diff. So it was built first, in a
-  # throwaway expression outside this repo: exit 0, zero errors, and
-  # lib/mozc/mozc_tool - the binary that hosts this very dialog - is in the
-  # output. Only then was it written here.
-  #
-  # `--replace-fail` IS the tripwire, and it is free: substituteInPlace errors
-  # when the string is gone, so the day upstream or nixpkgs fixes this the build
-  # goes red and this overlay gets deleted instead of silently doing nothing.
-  # That contrast is the whole lesson of the v4l2loopback block above, where
-  # nixpkgs' own `sed -i '/depmod/d'` stopped matching and failed SILENTLY,
-  # which is what broke the kernel module tree in the first place.
-  mozcUicQualifiedClassOverlay = _final: prev: {
-    mozc = prev.mozc.overrideAttrs (old: {
-      postPatch = (old.postPatch or "") + ''
-        substituteInPlace src/gui/dictionary_tool/dictionary_tool.ui \
-          --replace-fail '"::mozc::gui::DictionaryContentTableWidget"' \
-                         '"mozc::gui::DictionaryContentTableWidget"' \
-          --replace-fail '<class>::mozc::gui::DictionaryContentTableWidget</class>' \
-                         '<class>mozc::gui::DictionaryContentTableWidget</class>'
-      '';
-    });
-  };
 in
 {
   imports = [ ./locale.nix ];
@@ -208,8 +98,6 @@ in
   nixpkgs.config.allowUnfree = true;
   nixpkgs.overlays = [
     ltraceCxx20FixtureOverlay
-    v4l2loopbackDepmodIndexOverlay
-    mozcUicQualifiedClassOverlay
   ];
 
   # Hard-link identical files in the store. Measured 2026-09-25: 12.7 GiB of
