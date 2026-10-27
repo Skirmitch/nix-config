@@ -122,17 +122,26 @@ in
 
   # Garbage Collection
   #
-  # 14d, not 7d, for the duration of the systemd-initrd migration.
+  # 14d, not 7d. This outlived its original reason and now has a better one.
   #
-  # Generations 239-248 are the scripted-initrd fallbacks this box rolls back to
-  # if the migration misbehaves (it did, twice, in May 2026 — see
-  # HANDOFF-systemd-initrd-migration.md). At 7d the Monday timer would have taken
-  # 235-241 on 2026-09-28, three of them fallbacks, and nix-gc does NOT rewrite
-  # the boot menu: the entries survive, point at collected store paths, and fail
-  # to boot exactly when you need them. 14d keeps a fortnight of rollbacks,
-  # which comfortably covers a migration attempt plus a weekend.
+  # It was widened "for the duration of the systemd-initrd migration", to protect
+  # the scripted-initrd fallback generations. That migration completed 2026-10-27
+  # and those fallbacks cannot exist any more: nixpkgs removed scripted initrd,
+  # so every generation in the menu is a systemd-initrd one. The old note said
+  # REVERT TO 7d. **Do not** — measured 2026-10-27, 7d is the wrong number here:
   #
-  # REVERT TO 7d once the migration is done and proven.
+  #   configurationLimit = 10 (modules/system/boot.nix), and the 10 newest
+  #   generations span 2026-10-20 to 10-26 — exactly 7 days at this cadence
+  #   (18 generations, arriving ~2.5/day in bursts).
+  #
+  # So at 7d the OLDEST MENU ENTRY sits exactly on the collection boundary, and
+  # nix-gc does NOT rewrite the boot menu: the entry survives, points at a
+  # collected store path, and fails to boot precisely when it is needed. 14d
+  # keeps the whole menu reachable with a week of margin.
+  #
+  # The two numbers are coupled: if configurationLimit ever grows, this must grow
+  # with it. Mechanism recorded in the auto-memory note
+  # reference_systemd_initrd_rollback_rerun.md.
   nix.gc = {
     automatic = true;
     dates = "weekly";

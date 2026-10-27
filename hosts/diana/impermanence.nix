@@ -31,50 +31,7 @@ let
   rootDevice = config.fileSystems."/".device;
   rootDeviceUnit = "${utils.escapeSystemdPath rootDevice}.device";
 
-  # --- PHASE TOGGLE: "probe" (Phase 1) -> "wipe" (Phase 2) ---
-  #
-  # The migration is deliberately two reboots, and this is the switch between
-  # them. It exists so the ORDERING STANZAS BELOW ARE SHARED BYTE FOR BYTE
-  # between the two phases: Phase 2 is a one-word edit here, not a re-paste that
-  # could silently differ from the arrangement Phase 1 just proved.
-  #
-  # DELETE the probe branch and this toggle in Phase 3, once the wipe is
-  # verified. It is migration scaffolding, not a feature.
-  rollbackMode = "wipe";
-
-  # Records what happened and DELETES NOTHING. One block is appended PER
-  # INVOCATION, which is the whole point: if the re-run bug survived
-  # RemainAfterExit, this boot writes TWO blocks instead of one, rather than the
-  # re-run being assumed away. The file lands at the btrfs TOP LEVEL, so it
-  # survives the wipe that Phase 2 turns on and is read back by mounting
-  # subvolid=5.
-  #
-  # `if` rather than the handoff draft's `[ ... ] && already=yes`: measured
-  # 2026-10-26 that both survive the `set -e` makeJobScript injects, so the
-  # draft was not broken - this form is simply the same shape as the wipe's
-  # guard below, and a unit that is requiredBy sysroot.mount is the wrong place
-  # to leave a construct whose set -e behaviour has to be reasoned about.
-  probeScript = ''
-    already=no
-    while read -r _ mp _; do
-      if [ "$mp" = /sysroot ]; then already=yes; fi
-    done < /proc/self/mounts
-
-    mkdir -p /mnt
-    mount -t btrfs -o subvol=/ ${rootDevice} /mnt
-    {
-      echo "=== $(date -Is 2>/dev/null || echo no-date) invocation"
-      if [ "$already" = yes ]; then
-        echo "FAIL - /sysroot ALREADY MOUNTED (ordering broke, or this is a re-run)"
-      else
-        echo "OK - ordering holds"
-      fi
-    } >> /mnt/ordering-probe.txt
-    sync
-    umount /mnt
-  '';
-
-  wipeScript = ''
+  rollbackScript = ''
     # A stray second invocation must be a no-op, not gen 127 again - but it
     # must SAY SO. With this guard a broken ordering looks identical to a
     # harmless re-run: both exit 0 and neither wipes. That is the exact shape
@@ -90,11 +47,12 @@ let
     done < /proc/self/mounts
 
     mkdir -p /mnt
-    # Guard 1: a failed mount must FAIL, not fall through. Without this the
-    # steps below are silent no-ops against an empty /mnt and the only thing
-    # returning non-zero is the final `umount` - i.e. the script is fail-closed
-    # by accident, not by design. That exact shape hid a dead wipe for 4 days
-    # (see the nvme-renumber incident).
+    # Guard 1 is for the MESSAGE, not the control flow. makeJobScript already
+    # injects `set -e` (verified 2026-10-27: it is line 2 of the generated
+    # unit-script-rollback-start), so a failed mount aborts here with or without
+    # the `||`. What it buys is a NAMED reason in the journal instead of a bare
+    # non-zero exit - and this unit is requiredBy sysroot.mount, so its failure
+    # halts the boot and the line someone reads at the console is this one.
     mount -t btrfs -o subvol=/ ${rootDevice} /mnt || { echo "rollback: mount of ${rootDevice} FAILED - refusing to touch anything"; exit 1; }
 
     # Guard 2: verify the DESTINATION before destroying the source. The park
@@ -185,7 +143,7 @@ in
     # (btrfs.nix:118) and mount/umount. The script runs under bash with `set -e`
     # injected by makeJobScript (systemd-lib.nix:555) - every line is written to
     # survive that.
-    script = if rollbackMode == "probe" then probeScript else wipeScript;
+    script = rollbackScript;
   };
 
   # --- PERSISTENCE DEFINITIONS ---
