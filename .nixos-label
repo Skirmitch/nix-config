@@ -1,1 +1,1 @@
-hc-store rollup epoch 8 + stale-row view
+hc-store placement rename + stale-origin warn

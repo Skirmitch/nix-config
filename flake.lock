@@ -103,11 +103,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1793182796,
-        "narHash": "sha256-WmMaD0UV7VukuC/BNz8KiXlJ5KEYy/9bs1bIgxB5syE=",
+        "lastModified": 1793189123,
+        "narHash": "sha256-KE+auhVFlDqpP53JmWK2eFdvSO3H2iUHrn/M3bpL9Zo=",
         "ref": "refs/heads/master",
-        "rev": "7c1de34e68aa52b58a5b51ca7eacbf3cdbf0c913",
-        "revCount": 143,
+        "rev": "b6d8d6a65f1de97e37284534aad8fd670c743266",
+        "revCount": 147,
         "type": "git",
         "url": "file:///home/skirmitch/Projects/hc-sync"
       },
