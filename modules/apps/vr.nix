@@ -5,15 +5,39 @@ let
   steamvrLauncher =
     "/home/skirmitch/.local/share/Steam/steamapps/common/SteamVR/bin/linux64/vrcompositor-launcher";
 
-  # Tripwire for the avahi warning fix at the bottom of this file. `pathExists`
-  # guards an upstream rename: a bare `readFile` of a vanished path throws and
-  # takes the WHOLE eval down, which is a worse failure than the warning we are
-  # silencing. The infix is the obsolete option wivrn.nix still sets; one
-  # occurrence in nixpkgs 02c087f3fe.
-  wivrnModule = "${modulesPath}/services/video/wivrn.nix";
-  wivrnStillSetsObsoleteAvahiOptions =
-    builtins.pathExists wivrnModule
-    && lib.hasInfix "userServices = true;" (builtins.readFile wivrnModule);
+  # Tripwire for the avahi workaround at the bottom of this file: it answers
+  # "can that block be deleted yet?" and it has been wrong once, so read this
+  # before trusting or rewriting it.
+  #
+  # 2026-10-23 version: read wivrn.nix and matched `userServices = true;`.
+  # 2026-10-29: nixpkgs fixed wivrn.nix, the tripwire fired, and deleting the
+  # block brought BOTH warnings straight back - sunshine.nix (which this box
+  # runs) had been a second setter all along, invisible to that test because it
+  # writes `userServices = mkDefault true;` and the pattern demanded `true;`.
+  # So: match the option name, never a whole assignment, and never one file.
+  #
+  # Do NOT "improve" this by asking the option system who defines the option.
+  # `definitionsWithLocations` is filtered by priority, and the workaround below
+  # uses mkForce (prio 50), which DISCARDS every mkDefault/plain definition -
+  # so the list contains only our own override and the test always reads
+  # "nobody sets it". The workaround erases the evidence a tripwire would need.
+  #
+  # Authoritative check, 30 seconds, used on 2026-10-29: delete the block and
+  # `nix eval` the toplevel. Warnings silent -> it really was dead weight.
+  # Backstop: the day the avahi module *removes* the obsolete options, the
+  # mkForce below fails eval outright - loud, not silent.
+  obsoleteAvahiSetters = [
+    "services/networking/sunshine.nix"
+    "services/audio/music-assistant.nix"
+  ];
+  stillSetsObsoleteAvahiOptions =
+    f:
+    let
+      path = "${modulesPath}/${f}";
+    in
+    builtins.pathExists path && lib.hasInfix "userServices =" (builtins.readFile path);
+  upstreamStillSetsObsoleteAvahiOptions = lib.any stillSetsObsoleteAvahiOptions obsoleteAvahiSetters;
+
 in
 {
   # --- VR / PCVR streaming (Meta Quest 3) ---
@@ -95,8 +119,9 @@ in
   # nixpkgs' own module, nixos/modules/services/video/wivrn.nix, sets
   # `services.avahi.publish.{enable,userServices} = true`. Both were made
   # obsolete in the avahi module, so every eval of this system printed an
-  # obsolescence notice for options we never wrote. Checked against nixpkgs
-  # master on 2026-10-23: still unfixed upstream, so it has to be absorbed here.
+  # obsolescence notice for options we never wrote. As of 2026-10-29 wivrn.nix
+  # is fixed but sunshine.nix still sets both, so it still has to be absorbed
+  # here - see the tripwire note in the `let` block above.
   #
   # The mechanism (avahi-daemon.nix:475-483): the warning fires on
   # `cfg.publish.<x> != null`, so forcing them back to null removes it. mkForce
@@ -123,11 +148,11 @@ in
     publish-addresses = lib.mkDefault true;
   };
 
-  # Silent today; one actionable line the day upstream fixes wivrn.nix, so the
-  # workaround above gets deleted instead of quietly rotting into a no-op.
-  warnings = lib.optional (!wivrnStillSetsObsoleteAvahiOptions) ''
-    modules/apps/vr.nix: nixpkgs' wivrn module no longer sets the obsolete
-    services.avahi.publish options. The mkForce/settings.publish block in that
-    file is now dead weight - delete it and this warning.
+  # Silent today; one actionable line the day no upstream module sets these any
+  # more, so the workaround above gets deleted instead of rotting into a no-op.
+  warnings = lib.optional (!upstreamStillSetsObsoleteAvahiOptions) ''
+    modules/apps/vr.nix: no upstream module sets the obsolete
+    services.avahi.publish options any more. The mkForce/settings.publish block
+    in that file is now dead weight - delete it and this warning.
   '';
 }
