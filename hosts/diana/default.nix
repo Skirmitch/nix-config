@@ -19,6 +19,7 @@
     ../../modules/system/bulk-storage.nix
     ../../modules/system/btrfs-allocation.nix
     ../../modules/system/cooling.nix
+    ../../modules/system/power.nix
     ../../modules/gaming
     ../../modules/apps/claude.nix
     ../../modules/apps/docker.nix

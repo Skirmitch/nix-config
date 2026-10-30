@@ -90,6 +90,38 @@ in
     depends = [ "/mnt/bulk" "/home" ];
   };
 
+  # --- PAPER-2 RESEARCH DATA (2026-10-30) ---
+  #
+  # Public datasets and run outputs for the paper-2 seat, successor of midpowerroles.
+  # Asked for as "a btrfs subvolume of 300 GB at /home/skirmitch/agents/research/data".
+  #
+  # WHY IT IS NOT THERE. /home is btrfs (subvol @home) but shares ONE device,
+  # nvme2n1p2, with /, /nix, /persist and /var/log -- and that device had 263 GiB
+  # free when this was measured. 300 GB does not fit, and would have competed with
+  # the Nix store and the 128 G swapfile for the last of it. This disk had 569 GiB
+  # free. The requested path is preserved exactly, as a bind mount.
+  #
+  # NO QUOTA, by explicit instruction. Unlike the per-seat scratch subvolumes under
+  # /mnt/scratch, nothing caps this. It therefore shares @games' pool with Steam and
+  # aagl: 300 GB of run outputs here is 300 GB Steam cannot have. That is the
+  # accepted trade, not an oversight.
+  #
+  # A btrfs subvolume has no size at all -- "reserve 300 GB" is not a thing btrfs
+  # does. The only size mechanism is a qgroup LIMIT, which is a cap rather than a
+  # reservation, needs quotas enabled filesystem-wide, and costs performance on a
+  # volume holding a game library. Declined deliberately.
+  #
+  # The subvolume was created unprivileged (/mnt/bulk is skirmitch:users 755) and is
+  # owned by skirmitch. Note for lifecycle: `btrfs subvolume delete` on it will fail
+  # with EPERM for a non-root user, because this filesystem is not mounted
+  # `user_subvol_rm_allowed`. An EMPTY subvolume can still be removed with rmdir.
+  fileSystems."/home/skirmitch/agents/research/data" = {
+    device = "/mnt/bulk/research-data";
+    fsType = "none";
+    options = [ "bind" "nofail" ];
+    depends = [ "/mnt/bulk" "/home" ];
+  };
+
   # NOT moved, on purpose:
   #   .steam              44 K  — symlinks and config only; stays persisted
   #   Games               12 G  — the ON1 Photo RAW Wine prefix, which holds the licence

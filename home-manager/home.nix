@@ -90,6 +90,12 @@
       name = "Skirmitch";
       email = "skirmitch@gmail.com";
     };
+    # git-lfs for the paper-2 research seat (2026-10-30). This option, rather than
+    # dropping the bare `git-lfs` binary into systemPackages: it installs the binary
+    # AND writes the filter.lfs clean/smudge/process config that makes LFS actually
+    # engage. The binary alone is a half-install that looks present and does nothing
+    # on clone. Per-user, like jq already is on this machine.
+    lfs.enable = true;
   };
 
   programs.delta = {

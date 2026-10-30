@@ -18,6 +18,14 @@ let
   # it carries packages with nothing to do with CAD:
   #   jsonschema, pyyaml   - hard deps of the midpowerroles research seat
   #   requests, bs4, lxml  - source re-fetching for that same pipeline
+  #   scipy, pandas, pyarrow, numba, statsmodels, duckdb
+  #                        - the paper-2 research seat (2026-10-30), successor of
+  #                          midpowerroles above. Added HERE rather than as a second
+  #                          env for exactly the reason this comment exists.
+  #                          For the agents' DAY-TO-DAY work only: the pipeline does
+  #                          not depend on this environment for reproducibility, it
+  #                          ships its own pinned container. So a nixpkgs bump moving
+  #                          these versions is not a reproducibility event.
   #
   # THIS MUST REMAIN THE ONLY python3.withPackages ON JL's PATH. Measured
   # 2026-10-20: /etc/profiles/per-user/skirmitch/bin (home-manager) sits at PATH
@@ -41,6 +49,13 @@ let
     requests
     beautifulsoup4
     lxml
+    # --- paper-2 research seat, see the note above ---
+    scipy
+    pandas
+    pyarrow
+    numba
+    statsmodels
+    duckdb
   ]));
 in
 {
